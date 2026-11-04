@@ -105,7 +105,7 @@ GET  /planning/byDateAndIdRegion/:date  /planning/byNigendAndDate/:nigend/:date 
 POST /planning (ecraser: true = remplace les plages chevauchées)   GET /planning/overlaps   POST /planning/clear (suppression d'une période, parties hors période conservées)   PUT /planning/:id   DELETE /planning/:id   POST /planning/insert
 GET  /region?module=carte|planning  /region/all  /region/getNbPositionServiceByRegion  /region/getNbPositionServiceAllRegionMobile?from=&to=
 GET  /formulaire?region=&closed=&from=&to=   /formulaire/:id   POST /formulaire   PUT /formulaire/:id   PUT /formulaire/:id/close   DELETE /formulaire/:id
-GET  /admin/perimetres   PUT /admin/perimetres   (super administrateur)
+GET  /admin/perimetres   PUT /admin/perimetres   GET /admin/dashboard   GET /admin/journal   GET /admin/logs   GET|DELETE /admin/cache   (super administrateur)
 GET  /referentiel/positions?actif=true  /referentiel/creneaux  /referentiel/profils  /referentiel/grades  /referentiel/departements
 GET  /service  /service/alive  /service/configuration?idConfig=  /service/testvie  /service/carto
 GET  /service/geoloc  /service/coordinates?address=  /service/isochrone?x=&y=  /service/listTelUser/:nigend
@@ -322,6 +322,44 @@ qui répond. Chaque changement est aussi tracé dans le journal (`LogSettingsSer
 - le contenu des fiches de crise ;
 - les adresses géocodées ;
 - les valeurs du téléphone personnel et du commentaire (seul le nom des champs modifiés apparaît).
+
+## Tableau de bord d'administration
+
+Super administrateur : **Administration → Tableau de bord** (`/rni/administration`), avec les
+onglets *Journal* et *Périmètres*.
+
+| Bloc | Contenu |
+|---|---|
+| Indicateurs | utilisateurs connectés (activité de moins de `rni.dashboard.active_minutes`, 5 min par défaut) et du jour, requêtes du jour et par minute, **temps moyen par requête** (jour, dernière heure, 95e centile), **erreurs du jour** (réponses 5xx et alertes), disponibilité, requêtes lentes, refus (4xx), plannings saisis |
+| Graphiques | requêtes par heure et temps de réponse moyen par heure (24 h), avec infobulle et tableau horaire |
+| Utilisateurs connectés | identité, profil, région, dernière activité et dernière page, requêtes du jour |
+| Dernières erreurs | avec lien vers toutes les lignes de la requête concernée |
+| Routes les plus coûteuses | requêtes, moyenne, 95 %, maximum, erreurs, part du temps total |
+| Métier | comptes actifs par profil, fiches de crise ouvertes et créées, plages modifiées |
+| Système | version, workers, mémoire, cache (et invalidation partagée), journalisation, base (taille, connexions, migration), volume du journal |
+
+Le tableau se met à jour automatiquement toutes les 30 s ; la mise à jour est suspendue quand
+l'onglet du navigateur est masqué.
+
+Le **journal** propose :
+- des filtres : niveau minimal, contexte, texte, nigend, identifiant de requête (repris dans l'URL) ;
+- le dépliage d'une ligne : pile d'erreur, toutes les lignes de la même requête ;
+- le suivi en direct (rafraîchi toutes les 5 s) ;
+- les lignes plus anciennes, page par page.
+
+**Données (migration 2.6.0), communes à toutes les instances.** Chaque processus écrit par lots ;
+le cluster et plusieurs serveurs sont pris en charge.
+
+| Table | Alimentation | Rétention |
+|---|---|---|
+| `t_app_logs` | journaux à partir de `rni.log.db_level` (`log` par défaut), écrits toutes les 2 s, avec `request_id` et nigend ; sans le démarrage du framework ni le SQL sous `warn` | `rni.log.retention_days` (14 j) |
+| `t_request_metrics` | agrégats par minute, route (motif `/planning/:id`) et méthode : nombre, 4xx, 5xx, lentes, durées (totale, maximale, répartition pour le 95e centile), additionnés toutes les 10 s | `rni.metrics.retention_days` (30 j) |
+| `t_user_activity` | dernière activité de chaque nigend, requêtes du jour | idem |
+
+La purge est horaire, exécutée par un seul processus (verrou PostgreSQL). Les sondes `/health/*`
+ne sont pas comptées. Les lectures du tableau de bord et du journal ne sont pas inscrites dans
+le journal Splunk. `GET /rni/api/admin/dashboard` met son résultat en commun pendant 15 s ;
+`GET /rni/api/admin/journal?niveau=&contexte=&q=&nigend=&request_id=&avant=&limite=`.
 
 ## Dette technique du §9 : traitement
 

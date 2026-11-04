@@ -7,6 +7,7 @@ import { BusinessException } from '../business.exception.js';
 import type { RniRequest, RniUser } from './current-user.js';
 import { ALLOW_UNKNOWN_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
 import { PerimetreService } from './perimetre.service.js';
+import { requestStore } from '../runtime/request-store.js';
 import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -64,6 +65,8 @@ export class AuthGuard implements CanActivate {
 
     const user = await this.loadUser(nigend, req);
     req.rniUser = user;
+    const scope = requestStore.getStore();
+    if (scope) scope.nigend = user?.nigend ?? nigend.slice(0, 8);
     if (!user) {
       if (allowUnknown) return true;
       this.logger.warn(`Nigend ${nigend} non habilité à RNI (compte absent ou inactif) : ${req.method} ${req.originalUrl.split('?')[0]}`);

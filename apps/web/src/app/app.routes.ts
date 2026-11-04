@@ -45,10 +45,27 @@ export const routes: Routes = [
       },
       {
         path: 'administration',
-        title: 'Administration — RNI',
         canActivate: [superAdminGuard],
-        canDeactivate: [unsavedChangesGuard],
-        loadComponent: () => import('./features/admin/perimetres-page').then((m) => m.PerimetresPage),
+        loadComponent: () => import('./features/admin/admin-layout').then((m) => m.AdminLayout),
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'tableau-de-bord' },
+          {
+            path: 'tableau-de-bord',
+            title: 'Tableau de bord — Administration RNI',
+            loadComponent: () => import('./features/admin/dashboard/dashboard-page').then((m) => m.DashboardPage),
+          },
+          {
+            path: 'journal',
+            title: 'Journal — Administration RNI',
+            loadComponent: () => import('./features/admin/journal/journal-page').then((m) => m.JournalPage),
+          },
+          {
+            path: 'perimetres',
+            title: 'Périmètres — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/perimetres-page').then((m) => m.PerimetresPage),
+          },
+        ],
       },
     ],
   },

@@ -354,3 +354,125 @@ export interface PerimetreProfilDto {
 export interface PerimetreUpdateDto {
   items: { id_profil: number; module: PerimetreModule; perimetre: Perimetre }[];
 }
+
+// -----------------------------------------------------------------------------
+// Tableau de bord d'administration (supervision)
+// -----------------------------------------------------------------------------
+
+export type AppLogLevel = 'fatal' | 'error' | 'warn' | 'log' | 'debug' | 'verbose';
+
+/** Ligne du journal applicatif conservé en base (`t_app_logs`). */
+export interface AppLogDto {
+  id_log: number;
+  horodatage: string;
+  niveau: AppLogLevel;
+  contexte: string | null;
+  message: string;
+  pile: string | null;
+  request_id: string | null;
+  nigend: string | null;
+  pid: number | null;
+  hote: string | null;
+}
+
+export interface AppLogQuery {
+  /** Niveau minimal affiché (error = erreurs seules, log = tout sauf debug…). */
+  niveau?: AppLogLevel;
+  contexte?: string;
+  q?: string;
+  request_id?: string;
+  nigend?: string;
+  /** Pagination : identifiants strictement inférieurs (défilement vers le passé). */
+  avant?: number;
+  limite?: number;
+}
+
+export interface AppLogPageDto {
+  items: AppLogDto[];
+  /** Contextes présents sur les dernières 24 h (filtre). */
+  contextes: { contexte: string; nb: number }[];
+  /** Plus ancien identifiant renvoyé (page suivante) ; null s'il n'y en a plus. */
+  suivant: number | null;
+}
+
+export interface DashboardHourDto {
+  heure: string;
+  nb: number;
+  nb_4xx: number;
+  nb_5xx: number;
+  moyenne_ms: number | null;
+  max_ms: number;
+}
+
+export interface DashboardRouteDto {
+  methode: string;
+  route: string;
+  nb: number;
+  nb_5xx: number;
+  moyenne_ms: number;
+  max_ms: number;
+  /** Borne supérieure approchée du 95e centile (ms) ; null au-delà de 3 s. */
+  p95_ms: number | null;
+  part_temps: number;
+}
+
+export interface ConnectedUserDto {
+  nigend: string;
+  grade: string | null;
+  nom: string | null;
+  prenom: string | null;
+  libelle_profil: string | null;
+  libelle_region: string | null;
+  derniere_activite: string;
+  derniere_route: string | null;
+  nb_requetes_jour: number;
+}
+
+export interface AdminDashboardDto {
+  genere_le: string;
+  fenetre_connexion_min: number;
+  kpis: {
+    connectes: number;
+    utilisateurs_jour: number;
+    requetes_jour: number;
+    requetes_par_minute: number;
+    erreurs_jour: number;
+    erreurs_5xx_jour: number;
+    journal_erreurs_jour: number;
+    avertissements_jour: number;
+    refus_jour: number;
+    lentes_jour: number;
+    /** Seuil « lent » appliqué (rni.log.slow_ms). */
+    seuil_lent_ms: number;
+    temps_moyen_jour_ms: number | null;
+    temps_moyen_heure_ms: number | null;
+    p95_jour_ms: number | null;
+    disponibilite_jour: number | null;
+  };
+  heures: DashboardHourDto[];
+  routes: DashboardRouteDto[];
+  connectes: ConnectedUserDto[];
+  dernieres_erreurs: AppLogDto[];
+  metier: {
+    plannings_crees_jour: number;
+    plannings_modifies_jour: number;
+    comptes_actifs: number;
+    comptes_par_profil: { libelle: string; nb: number }[];
+    fiches_ouvertes: number;
+    fiches_creees_jour: number;
+  };
+  systeme: {
+    version: string;
+    environnement: string;
+    node: string;
+    pid: number;
+    hote: string;
+    demarre_le: string;
+    workers: number;
+    memoire_mo: { rss: number; tas: number };
+    cache: { entrees: number; taille_mo: number; taux_succes: number; ecoute: boolean };
+    journalisation: { niveau: string; source: string; niveau_base: string; contextes: Record<string, string>; sql: boolean };
+    base: { nom: string; taille_mo: number; connexions_api: number; version: string | null; migration: string | null };
+    journal: { lignes: number; plus_ancien: string | null };
+  };
+}

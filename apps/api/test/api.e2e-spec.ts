@@ -6,6 +6,10 @@ import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { APP_CONFIG, type AppConfig } from '../src/config/configuration.js';
 import { configureApp } from '../src/runtime/server.js';
+import { Logger } from '@nestjs/common';
+import { createLogger } from '../src/common/runtime/logger.js';
+import { LogPersistService } from '../src/common/supervision/log-persist.service.js';
+import { MetricsService } from '../src/common/supervision/metrics.service.js';
 import { CacheService } from '../src/common/cache/cache.service.js';
 import { Db } from '../src/database/db.service.js';
 import { ParamService } from '../src/modules/external/param.service.js';
@@ -38,6 +42,8 @@ describe('API RNI (e2e)', () => {
   beforeAll(async () => {
     const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
     const nest = mod.createNestApplication<NestExpressApplication>();
+    // Logger réel (sortie standard coupée : LOG_CONSOLE=false) : journal conservé en base testé
+    nest.useLogger(createLogger(nest.get<AppConfig>(APP_CONFIG)));
     configureApp(nest, nest.get<AppConfig>(APP_CONFIG));
     app = nest as unknown as INestApplication<App>;
     await app.init();
@@ -602,6 +608,69 @@ describe('API RNI (e2e)', () => {
       const cleared = (await as(SUPER_ADMIN).del('/admin/cache')).body;
       expect(cleared.entries).toBeLessThanOrEqual(1);
       expect(app.get(CacheService).stats().entries).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe('tableau de bord d’administration (supervision)', () => {
+    const flush = async () => {
+      await app.get(MetricsService).flush();
+      await app.get(LogPersistService).flush();
+      app.get(CacheService).delete('admin:*');
+    };
+
+    it('réservé au super administrateur', async () => {
+      expect((await as(GIGN).get('/admin/dashboard')).status).toBe(403);
+      expect((await as(REFERENT_IDF).get('/admin/journal')).status).toBe(403);
+    });
+
+    it('activité, performances, connectés, métier et système', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&region=11`);
+      await as(NEGO_IDF).get('/users/me');
+      await as(NEGO_IDF).get('/planning/999999'); // 404
+      await flush();
+      const r = await as(SUPER_ADMIN).get('/admin/dashboard');
+      expect(r.status).toBe(200);
+      const d = r.body;
+      expect(d.kpis.requetes_jour).toBeGreaterThan(3);
+      expect(d.kpis.connectes).toBeGreaterThanOrEqual(2);
+      expect(d.kpis.refus_jour).toBeGreaterThanOrEqual(1);
+      expect(d.kpis.temps_moyen_jour_ms).toBeGreaterThanOrEqual(0);
+      expect(d.kpis.p95_jour_ms).not.toBeUndefined();
+      expect(d.heures).toHaveLength(24);
+      expect(d.heures.at(-1).nb).toBeGreaterThan(0);
+      // Routes agrégées par motif (identifiants remplacés)
+      const routes = d.routes.map((x: { methode: string; route: string }) => `${x.methode} ${x.route}`);
+      expect(routes).toContain('GET /planning/timetable');
+      expect(routes.some((x: string) => x.includes('/planning/:id'))).toBe(true);
+      const nigends = d.connectes.map((c: { nigend: string }) => c.nigend);
+      expect(nigends).toEqual(expect.arrayContaining([REFERENT_IDF, NEGO_IDF]));
+      expect(d.connectes.find((c: { nigend: string }) => c.nigend === REFERENT_IDF)).toMatchObject({ nom: expect.any(String), libelle_profil: expect.any(String) });
+      expect(d.metier.comptes_actifs).toBeGreaterThan(50);
+      expect(d.systeme).toMatchObject({ pid: process.pid, base: { migration: expect.stringMatching(/^2\.6\.0/) } });
+      expect(d.systeme.cache.ecoute).toBe(true);
+    });
+
+    it('journal conservé en base : filtres, corrélation, pagination', async () => {
+      new Logger('TestE2E').error('Erreur de test du tableau de bord', new Error('boum').stack);
+      new Logger('TestE2E').debug('détail non conservé (sous rni.log.db_level)');
+      const w = await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(700), id_creneaux_debut: 1, date_fin: future(700), id_creneaux_fin: 1 });
+      const rid = w.headers['x-request-id'];
+      await flush();
+      const errors = (await as(SUPER_ADMIN).get('/admin/journal?niveau=error&contexte=TestE2E')).body;
+      expect(errors.items[0]).toMatchObject({ niveau: 'error', contexte: 'TestE2E', message: 'Erreur de test du tableau de bord' });
+      expect(errors.items[0].pile).toContain('boum');
+      expect((await as(SUPER_ADMIN).get('/admin/journal?q=non%20conserv')).body.items).toHaveLength(0);
+      // Toutes les lignes d'une requête, avec son nigend
+      const byRequest = (await as(SUPER_ADMIN).get(`/admin/journal?request_id=${rid}`)).body.items as { contexte: string; nigend: string }[];
+      expect(byRequest.map((x) => x.contexte)).toContain('HTTP');
+      expect(byRequest.every((x) => x.nigend === REFERENT_IDF)).toBe(true);
+      // Pagination
+      const p1 = (await as(SUPER_ADMIN).get('/admin/journal?limite=2')).body;
+      expect(p1.items).toHaveLength(2);
+      const p2 = (await as(SUPER_ADMIN).get(`/admin/journal?limite=2&avant=${p1.suivant}`)).body;
+      expect(p2.items[0].id_log).toBeLessThan(p1.items[1].id_log);
+      expect(p1.contextes.length).toBeGreaterThan(0);
     });
   });
 

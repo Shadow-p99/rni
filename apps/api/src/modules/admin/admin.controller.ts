@@ -1,4 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Put, Query } from '@nestjs/common';
+import type { AppLogLevel } from '@rni/shared';
+import { NoAudit } from '../../common/auth/decorators.js';
+import { DashboardService } from './dashboard.service.js';
 import { PERIMETRES, PERIMETRE_MODULES, Profil, type Perimetre, type PerimetreModule, type PerimetreUpdateDto } from '@rni/shared';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, ValidateNested } from 'class-validator';
@@ -40,7 +43,30 @@ export class AdminController {
     private readonly cache: CacheService,
     private readonly notify: CacheNotifyService,
     private readonly logs: LogSettingsService,
+    private readonly dashboardService: DashboardService,
   ) {}
+
+  /** Tableau de bord : activité, performances, erreurs, utilisateurs connectés, état du système. */
+  @Get('dashboard')
+  @NoAudit()
+  dashboard() {
+    return this.dashboardService.dashboard();
+  }
+
+  /** Journal applicatif conservé en base, filtré (niveau minimal, contexte, texte, requête, nigend). */
+  @Get('journal')
+  @NoAudit()
+  journal(
+    @Query('niveau') niveau?: AppLogLevel,
+    @Query('contexte') contexte?: string,
+    @Query('q') q?: string,
+    @Query('request_id') request_id?: string,
+    @Query('nigend') nigend?: string,
+    @Query('avant') avant?: string,
+    @Query('limite') limite?: string,
+  ) {
+    return this.dashboardService.journal({ niveau, contexte, q, request_id, nigend, avant: avant ? Number(avant) : undefined, limite: limite ? Number(limite) : undefined });
+  }
 
   /**
    * Réglages de journalisation appliqués par le processus qui répond. Ils se modifient dans

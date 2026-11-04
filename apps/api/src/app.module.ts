@@ -5,6 +5,7 @@ import { MockHeadersMiddleware } from './common/auth/mock-headers.middleware.js'
 import { RequestContextMiddleware } from './common/http/request-context.middleware.js';
 import { CommonModule } from './common/common.module.js';
 import { LoggingModule } from './common/logging/logging.module.js';
+import { SupervisionModule } from './common/supervision/supervision.module.js';
 import { HttpExceptionFilter } from './common/http-exception.filter.js';
 import { SplunkInterceptor } from './common/splunk.interceptor.js';
 import { JsonPayloadInterceptor } from './common/cache/json-payload.interceptor.js';
@@ -27,6 +28,7 @@ import { UsersModule } from './modules/users/users.module.js';
     CommonModule,
     ExternalModule,
     LoggingModule,
+    SupervisionModule,
     ReferentielModule,
     RegionModule,
     UsersModule,

@@ -50,7 +50,7 @@ export interface AppConfig {
     /** Exécute les migrations au démarrage (verrou PostgreSQL : sûr avec plusieurs instances). */
     migrateOnStart: boolean;
   };
-  log: { format: 'json' | 'text'; level: 'error' | 'warn' | 'log' | 'debug' | 'verbose' };
+  log: { format: 'json' | 'text'; level: 'error' | 'warn' | 'log' | 'debug' | 'verbose'; console: boolean };
 }
 
 export class ConfigError extends Error {}
@@ -152,7 +152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, cpus = 1): AppC
       shutdownDelayMs: int('SHUTDOWN_DELAY_MS', isLocal ? 0 : 3000, 0, 60_000),
       migrateOnStart: bool('MIGRATE_ON_START', false),
     },
-    log: { format: logFormat as 'json' | 'text', level: logLevel as AppConfig['log']['level'] },
+    log: { format: logFormat as 'json' | 'text', level: logLevel as AppConfig['log']['level'], console: bool('LOG_CONSOLE', true) },
   };
 
   // §8 : l'injection d'un utilisateur factice est interdite hors développement.

@@ -1,10 +1,12 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable, Logger, NestMiddleware } from '@nestjs/common';
+import { Inject, Injectable, Logger, NestMiddleware, Optional } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
 import type { RniRequest } from '../auth/current-user.js';
 import { currentLogSettings } from '../logging/log-settings.service.js';
 import { LifecycleService } from '../runtime/lifecycle.service.js';
+import { requestStore } from '../runtime/request-store.js';
+import { MetricsService, routePattern } from '../supervision/metrics.service.js';
 
 export const PROXY_SECRET_HEADER = 'x-rni-proxy-secret';
 const REQUEST_ID = /^[\w.:-]{8,128}$/;
@@ -22,9 +24,14 @@ const access = new Logger('HTTP');
  * - sondes → verbose ; lecture → debug ; écriture → log ;
  * - 401 / 403, réponse ≥ 500 ou plus lente que `rni.log.slow_ms` → warn.
  */
-function logAccess(req: RequestWithId, res: Response, started: bigint, aborted: boolean): void {
+function logAccess(req: RequestWithId, res: Response, started: bigint, aborted: boolean, metrics?: MetricsService | null): void {
   const ms = Number((process.hrtime.bigint() - started) / 1_000_000n);
   const path = req.originalUrl.split('?')[0];
+  // Métriques (tableau de bord) : toutes les requêtes sauf les sondes
+  if (metrics && !PROBES.test(path)) {
+    const matched = (req.route as { path?: string } | undefined)?.path;
+    metrics.record(req.method, routePattern(matched, path), aborted ? 499 : res.statusCode, ms, req.rniUser?.nigend ?? null);
+  }
   const size = res.getHeader('content-length');
   const who = req.rniUser?.nigend ?? (typeof req.headers['nigend'] === 'string' ? `${req.headers['nigend']}?` : '-');
   const line = `${req.method} ${path} ${aborted ? 'interrompue' : res.statusCode} ${ms} ms${size ? ` ${size} o` : ''} nigend=${who} [${req.id}]`;
@@ -51,6 +58,7 @@ export class RequestContextMiddleware implements NestMiddleware {
   constructor(
     @Inject(APP_CONFIG) cfg: AppConfig,
     private readonly lifecycle: LifecycleService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     this.secret = cfg.proxySecret ? Buffer.from(cfg.proxySecret) : null;
   }
@@ -61,8 +69,8 @@ export class RequestContextMiddleware implements NestMiddleware {
     res.setHeader('X-Request-Id', req.id);
     const started = process.hrtime.bigint();
     let done = false;
-    res.once('finish', () => ((done = true), logAccess(req, res, started, false)));
-    res.once('close', () => !done && logAccess(req, res, started, true));
+    res.once('finish', () => ((done = true), logAccess(req, res, started, false, this.metrics)));
+    res.once('close', () => !done && logAccess(req, res, started, true, this.metrics));
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -81,6 +89,7 @@ export class RequestContextMiddleware implements NestMiddleware {
       }
     }
     delete req.headers[PROXY_SECRET_HEADER];
-    next();
+    // Contexte de la requête (corrélation des journaux) pour toute la suite du traitement
+    requestStore.run({ id: req.id }, next);
   }
 }

@@ -1,6 +1,7 @@
 import cluster from 'node:cluster';
 import { ConsoleLogger, type LogLevel } from '@nestjs/common';
 import type { AppConfig } from '../../config/configuration.js';
+import { logSink } from '../logging/log-sink.js';
 
 /** Du moins au plus bavard. */
 export const LOG_LEVELS = ['fatal', 'error', 'warn', 'log', 'debug', 'verbose'] as const satisfies readonly LogLevel[];
@@ -36,6 +37,8 @@ export function parseContextLevels(raw: string | null | undefined): { levels: Ma
 export class RniLogger extends ConsoleLogger {
   private threshold: RniLogLevel = 'log';
   private contexts = new Map<string, RniLogLevel>();
+  /** Sortie standard (désactivable pour les tests) ; la conservation en base est indépendante. */
+  consoleEnabled = true;
 
   configure(threshold: RniLogLevel, contexts: Map<string, RniLogLevel> = new Map()): void {
     this.threshold = threshold;
@@ -61,20 +64,37 @@ export class RniLogger extends ConsoleLogger {
 
   private contextOf(params: unknown[]): string | undefined {
     const last = params[params.length - 1];
-    return typeof last === 'string' ? last : this.context;
+    return typeof last === 'string' && !last.includes('\n') ? last : this.context;
+  }
+
+  /** error(message, pile?, contexte?) : la pile est un texte multiligne ou une Error. */
+  private stackOf(params: unknown[]): unknown {
+    return params.find((p) => p instanceof Error || (typeof p === 'string' && p.includes('\n')));
+  }
+
+  private emit(level: RniLogLevel, message: unknown, params: unknown[], print: () => void): void {
+    const context = this.contextOf(params);
+    if (this.consoleEnabled && this.enabledFor(level, context)) print();
+    logSink.capture(level, message, context, level === 'error' || level === 'fatal' ? this.stackOf(params) : undefined);
   }
 
   override log(message: unknown, ...params: unknown[]): void {
-    if (this.enabledFor('log', this.contextOf(params))) super.log(message, ...params);
+    this.emit('log', message, params, () => super.log(message, ...params));
   }
   override warn(message: unknown, ...params: unknown[]): void {
-    if (this.enabledFor('warn', this.contextOf(params))) super.warn(message, ...params);
+    this.emit('warn', message, params, () => super.warn(message, ...params));
   }
   override debug(message: unknown, ...params: unknown[]): void {
-    if (this.enabledFor('debug', this.contextOf(params))) super.debug(message, ...params);
+    this.emit('debug', message, params, () => super.debug(message, ...params));
   }
   override verbose(message: unknown, ...params: unknown[]): void {
-    if (this.enabledFor('verbose', this.contextOf(params))) super.verbose(message, ...params);
+    this.emit('verbose', message, params, () => super.verbose(message, ...params));
+  }
+  override error(message: unknown, ...params: unknown[]): void {
+    this.emit('error', message, params, () => super.error(message, ...params));
+  }
+  override fatal(message: unknown, ...params: unknown[]): void {
+    this.emit('fatal', message, params, () => super.fatal(message, ...params));
   }
 }
 
@@ -89,6 +109,7 @@ export function createLogger(cfg: AppConfig): RniLogger {
   const prefix = cluster.isWorker ? `rni-api:w${cluster.worker?.id}` : 'rni-api';
   const logger = new RniLogger({ json: cfg.log.format === 'json', colors: cfg.log.format === 'text' && process.stdout.isTTY, prefix });
   logger.configure(cfg.log.level);
+  logger.consoleEnabled = cfg.log.console;
   current = logger;
   return logger;
 }

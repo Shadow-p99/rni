@@ -28,4 +28,8 @@ INSERT INTO t_param_app (cle_param_app, valeur, description, is_front) VALUES
   ('rni.log.level',                        '',                          'Niveau de journalisation de l''API : error, warn, log, debug, verbose (vide = variable LOG_LEVEL)', false),
   ('rni.log.contexts',                     '',                          'Niveaux par contexte, ex. PlanningService=debug,HTTP=warn,SQL=debug (vide = aucun)', false),
   ('rni.log.sql',                          'false',                     'Journaliser chaque requête SQL (niveau debug, contexte SQL) : true / false', false),
-  ('rni.log.slow_ms',                      '1000',                      'Seuil (ms) au-delà duquel une requête HTTP ou SQL est signalée comme lente (warn)', false);
+  ('rni.log.slow_ms',                      '1000',                      'Seuil (ms) au-delà duquel une requête HTTP ou SQL est signalée comme lente (warn)', false),
+  ('rni.log.db_level',                     'log',                       'Niveau à partir duquel les journaux sont conservés en base (tableau de bord) : error, warn, log, debug', false),
+  ('rni.log.retention_days',               '14',                        'Durée de conservation du journal applicatif en base (jours)', false),
+  ('rni.metrics.retention_days',           '30',                        'Durée de conservation des métriques de requêtes (jours)', false),
+  ('rni.dashboard.active_minutes',         '5',                         'Fenêtre (minutes) au-delà de laquelle un utilisateur n''est plus compté comme connecté', false);
