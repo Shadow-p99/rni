@@ -119,6 +119,11 @@ export interface PlanningInputDto {
   adresse_temp?: string | null;
   x_adresse_temp?: number | null;
   y_adresse_temp?: number | null;
+  /**
+   * Création uniquement : remplace les plannings existants sur la période (les parties hors
+   * période sont conservées). Sans ce drapeau, un chevauchement est refusé (RNI-1005).
+   */
+  ecraser?: boolean;
 }
 
 export interface InsertPlanningDto extends PlanningInputDto {

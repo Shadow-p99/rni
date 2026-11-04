@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
-import { InsertPlanningBody, PlanningBody, PlanningUpdateBody } from './planning.dto.js';
+import { InsertPlanningBody, OverlapQuery, PlanningBody, PlanningUpdateBody } from './planning.dto.js';
 import { PlanningService } from './planning.service.js';
 
 const optInt = (v?: string) => (v == null || v === '' ? undefined : Number(v));
@@ -49,6 +49,12 @@ export class PlanningController {
   @Get('byPositionAndDate/:idPosition/:date')
   byPositionAndDate(@CurrentUser() user: RniUser, @Param('idPosition', ParseIntPipe) idPosition: number, @Param('date') date: string) {
     return this.service.byDate(user, date, { id_pos_service: idPosition });
+  }
+
+  /** Plannings existants qui seraient écrasés par une saisie sur cette période. */
+  @Get('overlaps')
+  overlaps(@CurrentUser() user: RniUser, @Query() q: OverlapQuery) {
+    return this.service.overlaps(user, { ...q, id_pos_service: 0 });
   }
 
   @Get(':id')

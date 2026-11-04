@@ -136,3 +136,19 @@ export function clipPlage(p: PlageBounds, windowStart: number, windowEnd: number
   const end = Math.min(s.end, windowEnd);
   return start > end ? null : slotsToPlage(start, end);
 }
+
+export interface RemainingPiece extends PlageWithPosition {
+  role: 'avant' | 'apres';
+}
+
+/**
+ * Écrasement (saisie sur une période déjà planifiée) : parties d'une plage existante conservées
+ * hors de la période [start, end] (index de créneaux). Vide si la plage est entièrement recouverte.
+ */
+export function splitAround(existing: PlageWithPosition, start: number, end: number): RemainingPiece[] {
+  const o = plageSlots(existing);
+  const out: RemainingPiece[] = [];
+  if (o.start < start) out.push({ ...slotsToPlage(o.start, Math.min(o.end, start - 1)), id_pos_service: existing.id_pos_service, role: 'avant' });
+  if (o.end > end) out.push({ ...slotsToPlage(Math.max(o.start, end + 1), o.end), id_pos_service: existing.id_pos_service, role: 'apres' });
+  return out;
+}

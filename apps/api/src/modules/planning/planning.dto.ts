@@ -1,6 +1,6 @@
 import type { InsertPlanningDto, PlanningInputDto } from '@rni/shared';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -46,6 +46,11 @@ export class PlanningBody extends PlageBody implements PlanningInputDto {
   @IsString()
   @Matches(/^\d{5,8}$/, { message: 'nigend invalide' })
   nigend: string;
+
+  /** Remplace les plannings existants sur la période (création uniquement). */
+  @IsOptional()
+  @IsBoolean()
+  ecraser?: boolean;
 }
 
 /** En modification, le nigend est facultatif (il ne peut de toute façon pas changer). */
@@ -59,4 +64,24 @@ export class InsertPlanningBody extends PlanningUpdateBody implements Omit<Inser
   @Type(() => Number)
   @IsInt()
   id_planning: number;
+}
+
+/** `GET /planning/overlaps` : période envisagée pour un agent. */
+export class OverlapQuery {
+  @Matches(/^\d{5,8}$/, { message: 'nigend invalide' })
+  nigend: string;
+
+  @Matches(ISO, { message: 'date_debut invalide (AAAA-MM-JJ)' })
+  date_debut: string;
+
+  @Type(() => Number)
+  @IsIn([1, 2])
+  id_creneaux_debut: number;
+
+  @Matches(ISO, { message: 'date_fin invalide (AAAA-MM-JJ)' })
+  date_fin: string;
+
+  @Type(() => Number)
+  @IsIn([1, 2])
+  id_creneaux_fin: number;
 }

@@ -159,6 +159,48 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_IDF).del(`/planning/${id}`)).status).toBe(204);
       expect((await as(GIGN).get(`/planning/${id}`)).status).toBe(404);
     });
+    it('écrasement : aperçu des plages chevauchées puis remplacement atomique sur la période', async () => {
+      const plage = { ...base, date_debut: future(500), date_fin: future(509) }; // Jour J500 → Nuit J509, Disponible
+      const a = await as(REFERENT_IDF).post('/planning', plage);
+      expect(a.status).toBe(201);
+      const period = { nigend: NEGO_IDF, date_debut: future(503), id_creneaux_debut: 2, date_fin: future(505), id_creneaux_fin: 1 };
+      // Sans « ecraser » : refus habituel
+      expect((await as(REFERENT_IDF).post('/planning', { ...period, id_pos_service: 3 })).body.code).toBe('RNI-1005');
+      // Aperçu
+      const q = new URLSearchParams(Object.entries(period).map(([k, v]) => [k, String(v)])).toString();
+      const preview = await as(REFERENT_IDF).get(`/planning/overlaps?${q}`);
+      expect(preview.status).toBe(200);
+      expect(preview.body.map((p: { id_planning: number }) => p.id_planning)).toEqual([a.body.id_planning]);
+      // Écrasement
+      const r = await as(REFERENT_IDF).post('/planning', { ...period, id_pos_service: 3, ecraser: true });
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({ date_debut: future(503), id_creneaux_debut: 2, date_fin: future(505), id_creneaux_fin: 1, id_pos_service: 3 });
+      expect((await as(GIGN).get(`/planning/${a.body.id_planning}`)).status).toBe(404);
+      const after = (await as(REFERENT_IDF).get(`/planning/overlaps?${new URLSearchParams({ nigend: NEGO_IDF, date_debut: future(500), id_creneaux_debut: '1', date_fin: future(509), id_creneaux_fin: '2' })}`)).body as {
+        date_debut: string; id_creneaux_debut: number; date_fin: string; id_creneaux_fin: number; id_pos_service: number;
+      }[];
+      expect(after.map((p) => [p.date_debut, p.id_creneaux_debut, p.date_fin, p.id_creneaux_fin, p.id_pos_service])).toEqual([
+        [future(500), 1, future(503), 1, 1], // conservé avant
+        [future(503), 2, future(505), 1, 3], // nouvelle plage
+        [future(505), 2, future(509), 2, 1], // conservé après
+      ]);
+      // Recouvrement total : les trois plages sont remplacées par une seule
+      const all = await as(REFERENT_IDF).post('/planning', { ...base, date_debut: future(499), date_fin: future(510), id_pos_service: 2, ecraser: true });
+      expect(all.status).toBe(201);
+      const rest = (await as(REFERENT_IDF).get(`/planning/overlaps?${new URLSearchParams({ nigend: NEGO_IDF, date_debut: future(499), id_creneaux_debut: '1', date_fin: future(510), id_creneaux_fin: '2' })}`)).body;
+      expect(rest).toHaveLength(1);
+      await as(REFERENT_IDF).del(`/planning/${all.body.id_planning}`);
+    });
+    it('écrasement refusé pour un négociateur sur une plage Alerte (BR-PLA-4), sans rien modifier', async () => {
+      const alerte = await as(REFERENT_IDF).post('/planning', { ...base, date_debut: future(520), date_fin: future(522), id_pos_service: 4 });
+      expect(alerte.status).toBe(201);
+      const r = await as(NEGO_IDF).post('/planning', { ...base, date_debut: future(521), date_fin: future(521), id_pos_service: 1, ecraser: true });
+      expect(r.body.code).toBe('RNI-1008');
+      expect((await as(GIGN).get(`/planning/${alerte.body.id_planning}`)).body.id_pos_service).toBe(4);
+      // Aperçu réservé à ceux qui peuvent écrire le planning de l'agent
+      expect((await as(REFERENT_MARTINIQUE).get(`/planning/overlaps?${new URLSearchParams({ nigend: NEGO_IDF, date_debut: future(520), id_creneaux_debut: '1', date_fin: future(522), id_creneaux_fin: '2' })}`)).status).toBe(403);
+      await as(REFERENT_IDF).del(`/planning/${alerte.body.id_planning}`);
+    });
     it('recherche serveur dans tout le périmètre : seuls les agents et régions correspondants', async () => {
       const month = new Date().toISOString().slice(0, 7);
       // Agent de Grand Est : trouvé par le GIGN (national)…

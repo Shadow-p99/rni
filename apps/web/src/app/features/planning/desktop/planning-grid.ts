@@ -1,5 +1,6 @@
-import { Component, input, output } from '@angular/core';
-import { Creneau, TimetableUserDto } from '@rni/shared';
+import { Component, HostListener, input, output } from '@angular/core';
+import { Creneau, PlageBounds, TimetableUserDto } from '@rni/shared';
+import { RangeSelection, rangeToPlage } from './range-selection';
 import { HalfCell } from '../planning-cells';
 import { PlanningRow } from './planning-desktop.store';
 
@@ -16,7 +17,17 @@ export interface CellClick {
   half: HalfCell;
 }
 
-/** Grille mensuelle d'une région : une ligne par personnel, demi-cases Jour / Nuit (BR-PLA-1). */
+/** Période sélectionnée par glisser sur la ligne d'un agent. */
+export interface RangeSelect {
+  user: TimetableUserDto;
+  plage: PlageBounds;
+}
+
+/**
+ * Grille mensuelle d'une région : une ligne par personnel, demi-cases Jour / Nuit (BR-PLA-1).
+ * Clic : ouvre la plage (ou crée un créneau). Clic-glisser sur la ligne d'un agent : sélectionne
+ * plusieurs créneaux et émet `rangeSelect` au relâchement (souris et tactile).
+ */
 @Component({
   selector: 'rni-planning-grid',
   host: { class: 'block overflow-x-auto' },
@@ -50,10 +61,42 @@ export interface CellClick {
             @for (c of row.cells; track c.date) {
               <td class="h-7 border-b border-l border-slate-100 p-0" [class.bg-slate-50]="c.weekend" [class.!bg-amber-50]="c.today">
                 @if (c.full) {
-                  <button type="button" class="block h-7 w-full" [style.background]="c.jour.color" [title]="title(c.jour)" [attr.aria-label]="title(c.jour)" [disabled]="!row.editable" [class.cursor-pointer]="row.editable" (click)="cellClick.emit({ user: row.user, half: c.jour })"></button>
+                  <button
+                    type="button"
+                    class="block h-7 w-full"
+                    [class.rni-cell-selected]="selected(row.user.id_user, c.jour.slot) || selected(row.user.id_user, c.nuit.slot)"
+                    [class.cursor-pointer]="row.editable"
+                    [class.touch-none]="row.editable"
+                    [style.background]="c.jour.color"
+                    [title]="title(c.jour)"
+                    [attr.aria-label]="title(c.jour)"
+                    [attr.data-user]="row.user.id_user"
+                    [attr.data-slot]="c.jour.slot"
+                    [attr.data-slot2]="c.nuit.slot"
+                    [disabled]="!row.editable"
+                    (pointerdown)="onPointerDown($event, row.user, c.jour, c.nuit)"
+                    (click)="onKeyboardClick($event, row.user, c.jour)"
+                  ></button>
                 } @else {
-                  <button type="button" class="block h-3.5 w-full border-b border-white/70" [style.background]="c.jour.color || '#e2e8f0'" [title]="title(c.jour)" [attr.aria-label]="title(c.jour)" [disabled]="!row.editable" [class.cursor-pointer]="row.editable" (click)="cellClick.emit({ user: row.user, half: c.jour })"></button>
-                  <button type="button" class="block h-3.5 w-full" [style.background]="c.nuit.color || '#cbd5e1'" [title]="title(c.nuit)" [attr.aria-label]="title(c.nuit)" [disabled]="!row.editable" [class.cursor-pointer]="row.editable" (click)="cellClick.emit({ user: row.user, half: c.nuit })"></button>
+                  @for (h of [c.jour, c.nuit]; track h.slot) {
+                    <button
+                      type="button"
+                      class="block h-3.5 w-full"
+                      [class.border-b]="h.creneau === 1"
+                      [class.border-white/70]="h.creneau === 1"
+                      [class.rni-cell-selected]="selected(row.user.id_user, h.slot)"
+                      [class.cursor-pointer]="row.editable"
+                      [class.touch-none]="row.editable"
+                      [style.background]="h.color || (h.creneau === 1 ? '#e2e8f0' : '#cbd5e1')"
+                      [title]="title(h)"
+                      [attr.aria-label]="title(h)"
+                      [attr.data-user]="row.user.id_user"
+                      [attr.data-slot]="h.slot"
+                      [disabled]="!row.editable"
+                      (pointerdown)="onPointerDown($event, row.user, h)"
+                      (click)="onKeyboardClick($event, row.user, h)"
+                    ></button>
+                  }
                 }
               </td>
             }
@@ -71,6 +114,69 @@ export class PlanningGrid {
   /** Libellé d'une position (pour l'infobulle). */
   readonly libelle = input<(id: number) => string>((id) => String(id));
   readonly cellClick = output<CellClick>();
+  readonly rangeSelect = output<RangeSelect>();
+
+  private readonly selection = new RangeSelection();
+  /** Demi-case de départ (pour le simple clic) et agent concerné. */
+  private origin: { user: TimetableUserDto; half: HalfCell } | null = null;
+
+  protected selected(userId: number, slot: number): boolean {
+    return this.selection.contains(userId, slot);
+  }
+
+  /** Créneau sous le pointeur ; pour une journée pleine, haut = Jour, bas = Nuit. */
+  private slotAt(target: Element | null, clientY: number): { userId: number; slot: number } | null {
+    const el = target?.closest<HTMLElement>('[data-slot]');
+    if (!el) return null;
+    const userId = Number(el.dataset['user']);
+    let slot = Number(el.dataset['slot']);
+    if (el.dataset['slot2']) {
+      const r = el.getBoundingClientRect();
+      if (clientY > r.top + r.height / 2) slot = Number(el.dataset['slot2']);
+    }
+    return { userId, slot };
+  }
+
+  onPointerDown(e: PointerEvent, user: TimetableUserDto, half: HalfCell, nuit?: HalfCell): void {
+    if (e.button !== 0) return;
+    e.preventDefault(); // pas de sélection de texte pendant le glisser
+    const at = this.slotAt(e.currentTarget as Element, e.clientY);
+    const start = nuit && at?.slot === nuit.slot ? nuit : half;
+    this.origin = { user, half: start };
+    this.selection.start(user.id_user, start.slot);
+    // Le tactile capture le pointeur sur l'élément de départ : on le relâche pour suivre le doigt.
+    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+  }
+
+  @HostListener('document:pointermove', ['$event'])
+  onPointerMove(e: PointerEvent): void {
+    if (!this.selection.active()) return;
+    const at = this.slotAt(document.elementFromPoint(e.clientX, e.clientY), e.clientY);
+    if (at) this.selection.move(at.userId, at.slot);
+  }
+
+  @HostListener('document:pointerup')
+  onPointerUp(): void {
+    if (!this.selection.active() || !this.origin) return;
+    const range = this.selection.end();
+    const { user, half } = this.origin;
+    this.origin = null;
+    if (!range) return;
+    if (range.start === range.end) this.cellClick.emit({ user, half });
+    else this.rangeSelect.emit({ user, plage: rangeToPlage(range) });
+  }
+
+  @HostListener('document:pointercancel')
+  @HostListener('document:keydown.escape')
+  onCancel(): void {
+    this.selection.cancel();
+    this.origin = null;
+  }
+
+  /** Clavier (Entrée / Espace) : le clic souris est géré par les événements de pointeur. */
+  onKeyboardClick(e: MouseEvent, user: TimetableUserDto, half: HalfCell): void {
+    if (e.detail === 0) this.cellClick.emit({ user, half });
+  }
 
   protected title(h: HalfCell): string {
     const date = h.date.split('-').reverse().join('/');

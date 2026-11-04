@@ -102,7 +102,7 @@ GET  /users/isUser  /users/isAdmin  /users/me  /users?region=  /users/search?q= 
 POST /users          PUT /users/:id   DELETE /users/:id   PUT /users/infoDeviceUser   PUT /users/activateLocation
 GET  /planning/timetable?month=AAAA-MM&region=&q=&positions=1,4,0   /planning/geojson   /planning/:id
 GET  /planning/byDateAndIdRegion/:date  /planning/byNigendAndDate/:nigend/:date  /planning/byPositionAndDate/:id/:date
-POST /planning   PUT /planning/:id   DELETE /planning/:id   POST /planning/insert
+POST /planning (ecraser: true = remplace les plages chevauchées)   GET /planning/overlaps   PUT /planning/:id   DELETE /planning/:id   POST /planning/insert
 GET  /region?module=carte|planning  /region/all  /region/getNbPositionServiceByRegion  /region/getNbPositionServiceAllRegionMobile?from=&to=
 GET  /formulaire?region=&closed=&from=&to=   /formulaire/:id   POST /formulaire   PUT /formulaire/:id   PUT /formulaire/:id/close   DELETE /formulaire/:id
 GET  /admin/perimetres   PUT /admin/perimetres   (super administrateur)
@@ -183,7 +183,7 @@ pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView`
 | Route | Écran | Accès |
 |---|---|---|
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
-| `/planning` | **Une seule page, deux interfaces** selon la largeur d'écran (bascule en direct à 1038 px). Bureau : calendrier mensuel par région (chargement à la demande : la région de l'utilisateur à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), **recherche et filtre « Maintenant » exécutés par l'API dans tout le périmètre**, demi-cases Jour / Nuit, saisie / modification / insertion / suppression, export PDF A4 paysage. Mobile : calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide. `/planning-mobile` redirige vers `/planning` | habilités |
+| `/planning` | **Une seule page, deux interfaces** selon la largeur d'écran (bascule en direct à 1038 px). Bureau : calendrier mensuel par région (chargement à la demande : la région de l'utilisateur à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), **recherche et filtre « Maintenant » exécutés par l'API dans tout le périmètre**, demi-cases Jour / Nuit, **sélection de plusieurs jours par clic-glisser** sur la ligne d'un agent (modale pré-remplie ; au clic sur « Enregistrer », alerte si des plannings existants seront écrasés — remplacés sur la période, parties hors période conservées), saisie / modification / insertion / suppression, export PDF A4 paysage. Mobile : calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide. `/planning-mobile` redirige vers `/planning` | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
 | `/administration` | Périmètres de visualisation par profil sur la carte et le planning (modifications non enregistrées signalées) | super administrateur |
 | `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |

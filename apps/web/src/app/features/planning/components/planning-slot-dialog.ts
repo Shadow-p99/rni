@@ -6,6 +6,7 @@ import {
   GEOCODER_PLANNING_MIN_CHARS,
   GeocodeCandidate,
   PlanningDto,
+  PlageBounds,
   PlanningInputDto,
   Profil,
   RESTRICTED_POSITIONS,
@@ -37,6 +38,8 @@ export interface PlanningFormInit {
   user?: { nigend: string; label: string } | null;
   date?: string;
   creneau?: Creneau;
+  /** Période pré-remplie (sélection par glisser). */
+  range?: PlageBounds;
 }
 
 type Mode = 'edit' | 'insert';
@@ -193,6 +196,13 @@ export class PlanningSlotDialog implements OnInit {
       this.nigend.set(u.nigend);
       this.userLabel.set(`${u.nigend} — ${u.prenom} ${u.nom}`);
     }
+    if (i.range) {
+      this.dateDebut = i.range.date_debut;
+      this.creneauDebut = i.range.id_creneaux_debut;
+      this.dateFin = i.range.date_fin;
+      this.creneauFin = i.range.id_creneaux_fin;
+      return;
+    }
     this.dateDebut = this.dateFin = i.date ?? '';
     this.creneauDebut = i.creneau ?? Creneau.JOUR;
     this.creneauFin = i.creneau ?? Creneau.NUIT;
@@ -267,16 +277,47 @@ export class PlanningSlotDialog implements OnInit {
       const r = computeInsertion(e, body);
       if (!r.ok) return this.invalid(r.violation.message);
     }
+    // Création : plannings existants sur la période → confirmation d'écrasement
+    let ecraser = false;
+    if (!e) {
+      const ov = await this.action.run(() => this.api.overlaps(body, { silent: true }));
+      if (!ov.ok) return;
+      if (ov.value.length) {
+        if (this.auth.profil() === Profil.NEGOCIATEUR && ov.value.some((p) => RESTRICTED_POSITIONS.includes(p.id_pos_service))) {
+          return this.invalid('La période contient une plage Alerte ou Formateur, que seul un référent ou le GIGN peut écraser.');
+        }
+        if (!(await this.confirmOverwrite(ov.value))) return;
+        ecraser = true;
+      }
+    }
     const r = await this.action.run<unknown>(() =>
       insert
         ? this.api.insert({ ...body, id_planning: e!.id_planning }, { silent: true })
         : e
           ? this.api.update(e.id_planning, body, { silent: true })
-          : this.api.create(body, { silent: true }),
+          : this.api.create({ ...body, ecraser }, { silent: true }),
     );
     if (!r.ok) return;
-    this.toasts.success(insert ? 'Période insérée' : e ? 'Plage modifiée' : 'Créneau enregistré', insert ? 'La plage initiale a été découpée.' : undefined);
+    this.toasts.success(
+      insert ? 'Période insérée' : e ? 'Plage modifiée' : ecraser ? 'Créneau enregistré, plannings existants écrasés' : 'Créneau enregistré',
+      insert ? 'La plage initiale a été découpée.' : undefined,
+    );
     this.saved.emit();
+  }
+
+  /** Alerte d'écrasement : liste les plannings existants qui seront remplacés sur la période. */
+  private confirmOverwrite(existing: PlanningDto[]): Promise<boolean> {
+    const lines = existing
+      .slice(0, 6)
+      .map((p) => `• du ${fmt(p.date_debut)} (${cr(p.id_creneaux_debut)}) au ${fmt(p.date_fin)} (${cr(p.id_creneaux_fin)}) — ${this.ref.libelle(p.id_pos_service)}`);
+    if (existing.length > 6) lines.push(`• … et ${existing.length - 6} autre(s)`);
+    return this.confirm.ask(
+      'Plannings existants sur la période',
+      `${existing.length === 1 ? 'Le planning suivant sera écrasé' : `Les ${existing.length} plannings suivants seront écrasés`} ` +
+        `sur la période du ${fmt(this.dateDebut)} (${cr(this.creneauDebut)}) au ${fmt(this.dateFin)} (${cr(this.creneauFin)}) :\n\n` +
+        `${lines.join('\n')}\n\nLes parties en dehors de cette période sont conservées.`,
+      { confirmLabel: 'Écraser et enregistrer', danger: true },
+    );
   }
 
   async remove(): Promise<void> {

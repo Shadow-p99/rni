@@ -3,6 +3,8 @@ import { Creneau, NO_PLANNING_COLOR, TimetablePlanningDto, dayNumber, plageSlots
 export interface HalfCell {
   date: string;
   creneau: Creneau;
+  /** Index de créneau (cf. @rni/shared) : sert à la sélection par glisser. */
+  slot: number;
   planning: TimetablePlanningDto | null;
   color: string;
 }
@@ -34,8 +36,9 @@ export function buildCells(
     for (let s = start; s <= end; s++) bySlot.set(s, p);
   }
   const half = (date: string, creneau: Creneau): HalfCell => {
-    const planning = bySlot.get(toSlot(date, creneau)) ?? null;
-    return { date, creneau, planning, color: planning ? colorOf(planning.id_pos_service) : '' };
+    const slot = toSlot(date, creneau);
+    const planning = bySlot.get(slot) ?? null;
+    return { date, creneau, slot, planning, color: planning ? colorOf(planning.id_pos_service) : '' };
   };
   return days.map((date) => {
     const jour = half(date, Creneau.JOUR);

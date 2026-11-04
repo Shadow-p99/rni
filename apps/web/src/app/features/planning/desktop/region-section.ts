@@ -4,7 +4,7 @@ import { ReferentielService } from '../../../core/referentiel/referentiel.servic
 import { AsyncView } from '../../../shared/ui/async-view';
 import { Spinner } from '../../../shared/ui/spinner';
 import { RegionView } from './planning-desktop.store';
-import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
+import { CellClick, DayHeader, PlanningGrid, RangeSelect } from './planning-grid';
 
 /**
  * Section dépliable d'une région. L'en-tête (effectifs au créneau courant) est toujours affiché ;
@@ -54,7 +54,7 @@ import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
     </ng-template>
     @if (r.expanded) {
       <rni-async-view [loading]="r.loading" [pending]="r.pending || (!r.loaded && !r.error)" [error]="r.error" loadingText="Chargement de la région…" (retry)="retry.emit()">
-        <rni-planning-grid [rows]="r.rows" [days]="days()" [libelle]="libelle" (cellClick)="cellClick.emit($event)" />
+        <rni-planning-grid [rows]="r.rows" [days]="days()" [libelle]="libelle" (cellClick)="cellClick.emit($event)" (rangeSelect)="rangeSelect.emit($event)" />
       </rni-async-view>
     }
   `,
@@ -68,5 +68,6 @@ export class RegionSection {
   readonly toggled = output<void>();
   readonly retry = output<void>();
   readonly cellClick = output<CellClick>();
+  readonly rangeSelect = output<RangeSelect>();
   protected readonly libelle = (id: number) => this.ref.libelle(id);
 }

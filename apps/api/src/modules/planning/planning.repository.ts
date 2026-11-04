@@ -108,11 +108,12 @@ export class PlanningRepository {
   }
 
   /** BR-PLA-5 : plages du même agent qui recouvrent [start, end] (hors plage exclue). */
-  async overlapping(idUser: number, start: number, end: number, excludeIds: number[] = [], t?: Transaction): Promise<PlanningRow[]> {
+  async overlapping(idUser: number, start: number, end: number, excludeIds: number[] = [], t?: Transaction, lock = false): Promise<PlanningRow[]> {
     return this.db.select<PlanningRow>(
       `SELECT ${PLANNING_COLUMNS} FROM planning p JOIN ref_user ru ON ru.id_user = p.id_user
         WHERE p.id_user = :idUser AND p.slot_debut <= :end AND p.slot_fin >= :start
-          ${excludeIds.length ? 'AND p.id_planning NOT IN (:excludeIds)' : ''}`,
+          ${excludeIds.length ? 'AND p.id_planning NOT IN (:excludeIds)' : ''}
+        ORDER BY p.slot_debut ${lock ? 'FOR UPDATE OF p' : ''}`,
       { idUser, start, end, excludeIds },
       t,
     );

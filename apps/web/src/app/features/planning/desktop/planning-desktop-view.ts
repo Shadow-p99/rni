@@ -8,7 +8,7 @@ import { MonthNav } from '../../../shared/ui/month-nav';
 import { PositionFilter } from '../../../shared/ui/position-filter';
 import { PositionLegend } from '../../../shared/ui/position-legend';
 import { SearchInput } from '../../../shared/ui/search-input';
-import { CellClick } from './planning-grid';
+import { CellClick, RangeSelect } from './planning-grid';
 import { PlanningFormInit, PlanningSlotDialog } from '../components/planning-slot-dialog';
 import { RegionSection } from './region-section';
 import { PlanningDesktopStore } from './planning-desktop.store';
@@ -64,6 +64,7 @@ import { PlanningDesktopStore } from './planning-desktop.store';
               (toggled)="store.toggleRegion(r.id_region)"
               (retry)="store.loadRegion(r.id_region)"
               (cellClick)="open($event)"
+              (rangeSelect)="openRange($event)"
             />
           }
         </div>
@@ -80,6 +81,9 @@ import { PlanningDesktopStore } from './planning-desktop.store';
           <span class="inline-flex h-3 w-3 flex-col overflow-hidden rounded-sm"><span class="h-1/2 bg-slate-200"></span><span class="h-1/2 bg-slate-300"></span></span>
           Case : haut = Jour (08h-18h), bas = Nuit (18h-08h)
         </span>
+        @if (auth.canWritePlanning()) {
+          <span class="text-slate-500">— Cliquez-glissez sur la ligne d'un agent pour saisir plusieurs jours.</span>
+        }
       </rni-position-legend>
     </div>
 
@@ -110,6 +114,11 @@ export class PlanningDesktopView {
     } else {
       this.form.set({ user: { nigend: u.nigend, label }, date: half.date, creneau: half.creneau });
     }
+  }
+
+  /** Glisser-déposer sur la ligne d'un agent : création pré-remplie avec la période sélectionnée. */
+  openRange({ user: u, plage }: RangeSelect): void {
+    this.form.set({ user: { nigend: u.nigend, label: `${u.nigend} — ${u.prenom} ${u.nom}` }, range: plage });
   }
 
   onSaved(): void {

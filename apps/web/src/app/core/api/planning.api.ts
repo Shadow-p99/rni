@@ -39,6 +39,14 @@ export class PlanningApi {
   insert(dto: InsertPlanningDto, opts?: RequestOptions) {
     return this.http.post<PlanningDto[]>(`${API}/planning/insert`, dto, ctx(opts));
   }
+  /** Plannings existants qui seraient écrasés par une saisie sur cette période. */
+  overlaps(p: Pick<PlanningInputDto, 'nigend' | 'date_debut' | 'id_creneaux_debut' | 'date_fin' | 'id_creneaux_fin'>, opts?: RequestOptions) {
+    const { nigend, date_debut, id_creneaux_debut, date_fin, id_creneaux_fin } = p;
+    return this.http.get<PlanningDto[]>(`${API}/planning/overlaps`, {
+      params: toParams({ nigend, date_debut, id_creneaux_debut, date_fin, id_creneaux_fin }),
+      ...ctx(opts),
+    });
+  }
   remove(id: number, opts?: RequestOptions) {
     return this.http.delete<void>(`${API}/planning/${id}`, ctx(opts));
   }
