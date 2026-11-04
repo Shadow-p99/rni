@@ -1,19 +1,33 @@
 import { Component, inject, input, output } from '@angular/core';
 import { ReferentielService } from '../../../core/referentiel/referentiel.service';
+import { AsyncView } from '../../../shared/ui/async-view';
+import { Spinner } from '../../../shared/ui/spinner';
 import { RegionView } from '../planning.store';
 import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
 
-/** Section dépliable d'une région : effectifs au créneau courant et grille mensuelle. */
+/**
+ * Section dépliable d'une région. L'en-tête (effectifs au créneau courant) est toujours affiché ;
+ * la grille n'est chargée et affichée qu'une fois la région dépliée.
+ */
 @Component({
   selector: 'rni-region-section',
-  imports: [PlanningGrid],
+  imports: [PlanningGrid, AsyncView, Spinner],
   host: { class: 'card block overflow-hidden' },
   template: `
     @let r = region();
-    <button type="button" class="flex w-full flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-left" (click)="toggle.emit()" [attr.aria-expanded]="!collapsed()">
-      <span class="text-slate-400" aria-hidden="true">{{ collapsed() ? '▸' : '▾' }}</span>
+    <button type="button" class="flex w-full flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-left" (click)="toggle.emit()" [attr.aria-expanded]="r.expanded">
+      <span class="text-slate-400" aria-hidden="true">{{ r.expanded ? '▾' : '▸' }}</span>
       <span class="font-semibold">{{ r.libelle }}</span>
-      <span class="text-xs text-slate-500">{{ r.rows.length }} personnel(s)</span>
+      <span class="text-xs text-slate-500">
+        @if (r.expanded && r.loaded && filtered()) {
+          {{ r.rows.length }} / {{ r.total ?? '?' }} personnel(s)
+        } @else if (r.total != null) {
+          {{ r.total }} personnel(s)
+        }
+      </span>
+      @if (r.loading) {
+        <rni-spinner [size]="12" />
+      }
       @if (r.counts; as c) {
         <span class="ml-auto flex flex-wrap gap-1" title="Effectifs au créneau courant">
           @for (p of ref.positions(); track p.id_pos_service) {
@@ -27,8 +41,10 @@ import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
         </span>
       }
     </button>
-    @if (!collapsed()) {
-      <rni-planning-grid [rows]="r.rows" [days]="days()" [libelle]="libelle" (cellClick)="cellClick.emit($event)" />
+    @if (r.expanded) {
+      <rni-async-view [loading]="r.loading" [pending]="r.pending || (!r.loaded && !r.error)" [error]="r.error" loadingText="Chargement de la région…" (retry)="retry.emit()">
+        <rni-planning-grid [rows]="r.rows" [days]="days()" [libelle]="libelle" (cellClick)="cellClick.emit($event)" />
+      </rni-async-view>
     }
   `,
 })
@@ -36,8 +52,10 @@ export class RegionSection {
   protected readonly ref = inject(ReferentielService);
   readonly region = input.required<RegionView>();
   readonly days = input.required<DayHeader[]>();
-  readonly collapsed = input(false);
+  /** Un filtre (recherche / position) est actif : affiche « affichés / total ». */
+  readonly filtered = input(false);
   readonly toggle = output<void>();
+  readonly retry = output<void>();
   readonly cellClick = output<CellClick>();
   protected readonly libelle = (id: number) => this.ref.libelle(id);
 }

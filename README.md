@@ -181,7 +181,7 @@ pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView`
 | Route | Écran | Accès |
 |---|---|---|
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
-| `/planning` | Calendrier mensuel par région, demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
+| `/planning` | Calendrier mensuel par région (**chargement à la demande** : seule la région de l'utilisateur est chargée à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
 | `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
 | `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
@@ -194,7 +194,7 @@ En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_ap
 
 ---|---|---|
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
-| `/planning` | Calendrier mensuel par région, demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
+| `/planning` | Calendrier mensuel par région (**chargement à la demande** : seule la région de l'utilisateur est chargée à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
 | `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
 | `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |

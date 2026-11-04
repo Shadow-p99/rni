@@ -1,9 +1,8 @@
-import { Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { Creneau } from '@rni/shared';
 import { AuthService } from '../../core/auth/auth.service';
 import { ExportService } from '../../core/export/export.service';
 import { ReferentielService } from '../../core/referentiel/referentiel.service';
-import { AsyncView } from '../../shared/ui/async-view';
 import { ErrorPanel } from '../../shared/ui/error-panel';
 import { MonthNav } from '../../shared/ui/month-nav';
 import { PositionFilter } from '../../shared/ui/position-filter';
@@ -17,7 +16,7 @@ import { PlanningStore } from './planning.store';
 /** Planning national : calendrier mensuel par région (§5.1). */
 @Component({
   selector: 'rni-planning-page',
-  imports: [MonthNav, SearchInput, PositionFilter, PositionLegend, AsyncView, ErrorPanel, RegionSection, PlanningSlotDialog],
+  imports: [MonthNav, SearchInput, PositionFilter, PositionLegend, ErrorPanel, RegionSection, PlanningSlotDialog],
   providers: [PlanningStore],
   template: `
     <div class="flex flex-1 flex-col gap-3 p-3 desk:p-4">
@@ -26,32 +25,33 @@ import { PlanningStore } from './planning.store';
         <rni-search-input class="w-56" placeholder="Rechercher un personnel…" [debounceMs]="150" (search)="store.search.set($event)" />
         <rni-position-filter label="Maintenant :" [withNone]="true" [clearable]="true" [value]="store.positions()" (valueChange)="store.positions.set($event)" />
         <div class="ml-auto flex gap-2">
-          <button type="button" class="btn-secondary" (click)="exportPdf()" [disabled]="exporter.busy() || !store.timetable.data()">{{ exporter.busy() ? 'Export…' : '⤓ PDF' }}</button>
+          <button type="button" class="btn-secondary" (click)="exportPdf()" [disabled]="exporter.busy() || !store.hasData()">{{ exporter.busy() ? 'Export…' : '⤓ PDF' }}</button>
           @if (auth.canWritePlanning()) {
             <button type="button" class="btn-primary" (click)="form.set({ date: store.today, creneau: Jour })">+ Nouveau créneau</button>
           }
         </div>
       </div>
 
-      @if (store.counts.error() && store.timetable.data()) {
-        <rni-error-panel [error]="store.counts.error()" [retryable]="true" (retry)="store.counts.reload()" />
+      @if (store.counts.error()) {
+        <rni-error-panel [error]="store.counts.error()" [retryable]="true" (retry)="store.loadCounts()" />
       }
 
-      <rni-async-view
-        [loading]="store.timetable.loading()"
-        [pending]="store.timetable.pending()"
-        [error]="store.timetable.error()"
-        [empty]="!store.regions().length"
-        emptyText="Aucune région dans votre périmètre."
-        loadingText="Chargement du planning…"
-        (retry)="store.load()"
-      >
+      @if (store.regions().length) {
         <div #print class="flex flex-col gap-3">
           @for (r of store.regions(); track r.id_region) {
-            <rni-region-section [region]="r" [days]="store.dayHeaders()" [collapsed]="store.collapsed().has(r.id_region)" (toggle)="store.toggleRegion(r.id_region)" (cellClick)="open($event)" />
+            <rni-region-section
+              [region]="r"
+              [days]="store.dayHeaders()"
+              [filtered]="filtered()"
+              (toggle)="store.toggleRegion(r.id_region)"
+              (retry)="store.loadRegion(r.id_region)"
+              (cellClick)="open($event)"
+            />
           }
         </div>
-      </rni-async-view>
+      } @else {
+        <p class="card p-8 text-center text-sm text-slate-500">Aucune région dans votre périmètre.</p>
+      }
 
       <rni-position-legend class="px-1">
         <span class="flex items-center gap-1">
@@ -75,8 +75,10 @@ export class PlanningPage {
   protected readonly form = signal<PlanningFormInit | null>(null);
   protected readonly Jour = Creneau.JOUR;
 
+  protected readonly filtered = computed(() => !!this.store.search().trim() || this.store.positions().size > 0);
+
   constructor() {
-    void this.store.load();
+    this.store.init();
   }
 
   open({ user: u, half }: CellClick): void {
@@ -91,7 +93,7 @@ export class PlanningPage {
 
   onSaved(): void {
     this.form.set(null);
-    void this.store.load();
+    this.store.refresh();
   }
 
   exportPdf(): void {
