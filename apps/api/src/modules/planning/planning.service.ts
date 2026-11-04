@@ -28,6 +28,7 @@ import {
   toSlot,
   validatePlageBounds,
 } from '@rni/shared';
+import type { Transaction } from 'sequelize';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import { searchTerms } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
@@ -349,38 +350,7 @@ export class PlanningService {
   private async createOverwriting(current: RniUser, target: UserPlanningRow, dto: PlanningInputDto): Promise<PlanningDto> {
     const { start, end } = plageSlots(dto);
     const id = await this.db.transaction(async (transaction) => {
-      const overlaps = await this.repo.overlapping(target.id_user, start, end, [], transaction, true);
-      for (const o of overlaps) {
-        const v = checkPositionAllowed(current.id_profil, null, o.id_pos_service);
-        if (v) throw BusinessException.from({ ...v, message: `${v.message} Une plage existante ne peut pas être écrasée.` });
-      }
-      const pieces = overlaps.flatMap((o) =>
-        splitAround(o, start, end).map((p) => ({
-          ...p,
-          adresse_temp: o.adresse_temp,
-          x_adresse_temp: o.x_adresse_temp,
-          y_adresse_temp: o.y_adresse_temp,
-        })),
-      );
-      if (overlaps.length) await this.plannings.destroy({ where: { id_planning: overlaps.map((o) => o.id_planning) }, transaction });
-      for (const p of pieces) {
-        await this.plannings.create(
-          {
-            id_user: target.id_user,
-            date_debut: p.date_debut,
-            id_creneaux_debut: p.id_creneaux_debut,
-            date_fin: p.date_fin,
-            id_creneaux_fin: p.id_creneaux_fin,
-            id_pos_service: p.id_pos_service,
-            adresse_temp: p.adresse_temp,
-            x_adresse_temp: p.x_adresse_temp,
-            y_adresse_temp: p.y_adresse_temp,
-            created_by: current.nigend,
-            updated_by: current.nigend,
-          },
-          { transaction },
-        );
-      }
+      const { removed, kept } = await this.clearPeriodTx(current, target, start, end, transaction, 'écrasée');
       const created = await this.plannings.create(
         {
           id_user: target.id_user,
@@ -395,12 +365,69 @@ export class PlanningService {
         },
         { transaction },
       );
-      if (overlaps.length) {
-        this.adminLog.trace('planning.overwrite', current.nigend, { nigend: target.nigend, ecrasees: overlaps.map((o) => o.id_planning), conservees: pieces.length });
-      }
+      if (removed.length) this.adminLog.trace('planning.overwrite', current.nigend, { nigend: target.nigend, ecrasees: removed, conservees: kept });
       return created.id_planning;
     });
     return this.get(id);
+  }
+
+  /**
+   * Suppression d'un créneau ou d'une période (sélection) : les plannings de l'agent sont retirés
+   * sur [date_debut @ créneau, date_fin @ créneau], les parties hors période sont conservées.
+   * Atomique ; BR-PLA-4 (un négociateur ne retire pas une plage Alerte / Formateur).
+   */
+  async clearPeriod(current: RniUser, dto: PlageBounds & { nigend: string }): Promise<{ supprimees: number; conservees: number }> {
+    const target = await this.target(current, dto.nigend);
+    const v = validatePlageBounds(dto);
+    if (v) throw BusinessException.from(v);
+    const { start, end } = plageSlots(dto);
+    return this.db.transaction(async (transaction) => {
+      const { removed, kept } = await this.clearPeriodTx(current, target, start, end, transaction, 'supprimée');
+      if (removed.length) this.adminLog.trace('planning.clear', current.nigend, { nigend: target.nigend, periode: dto, supprimees: removed, conservees: kept });
+      return { supprimees: removed.length, conservees: kept };
+    });
+  }
+
+  /**
+   * Vide la période [start, end] du planning d'un agent dans une transaction : plages chevauchées
+   * verrouillées, contrôlées (BR-PLA-4), supprimées puis recréées pour leurs parties hors période.
+   */
+  private async clearPeriodTx(
+    current: RniUser,
+    target: UserPlanningRow,
+    start: number,
+    end: number,
+    transaction: Transaction,
+    verbe: 'écrasée' | 'supprimée',
+  ): Promise<{ removed: number[]; kept: number }> {
+    const overlaps = await this.repo.overlapping(target.id_user, start, end, [], transaction, true);
+    for (const o of overlaps) {
+      const v = checkPositionAllowed(current.id_profil, null, o.id_pos_service);
+      if (v) throw BusinessException.from({ ...v, message: `${v.message} Une plage existante ne peut pas être ${verbe}.` });
+    }
+    const pieces = overlaps.flatMap((o) =>
+      splitAround(o, start, end).map((p) => ({ ...p, adresse_temp: o.adresse_temp, x_adresse_temp: o.x_adresse_temp, y_adresse_temp: o.y_adresse_temp })),
+    );
+    if (overlaps.length) await this.plannings.destroy({ where: { id_planning: overlaps.map((o) => o.id_planning) }, transaction });
+    for (const p of pieces) {
+      await this.plannings.create(
+        {
+          id_user: target.id_user,
+          date_debut: p.date_debut,
+          id_creneaux_debut: p.id_creneaux_debut,
+          date_fin: p.date_fin,
+          id_creneaux_fin: p.id_creneaux_fin,
+          id_pos_service: p.id_pos_service,
+          adresse_temp: p.adresse_temp,
+          x_adresse_temp: p.x_adresse_temp,
+          y_adresse_temp: p.y_adresse_temp,
+          created_by: current.nigend,
+          updated_by: current.nigend,
+        },
+        { transaction },
+      );
+    }
+    return { removed: overlaps.map((o) => o.id_planning), kept: pieces.length };
   }
 
   async update(current: RniUser, id: number, dto: PlanningUpdateInput): Promise<PlanningDto> {

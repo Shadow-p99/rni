@@ -120,7 +120,11 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
 
       <ng-container footer>
         @if (existing() && !readOnlyReason() && mode() === 'edit') {
-          <button type="button" class="btn-danger mr-auto" (click)="remove()" [disabled]="action.busy()">Supprimer</button>
+          <button type="button" class="btn-danger mr-auto" (click)="remove()" [disabled]="action.busy()">{{ slot() ? 'Supprimer toute la plage' : 'Supprimer' }}</button>
+        } @else if (existing() && !readOnlyReason() && slot()) {
+          <button type="button" class="btn-danger mr-auto" (click)="clearPeriod('creneau')" [disabled]="action.busy()">Supprimer ce créneau</button>
+        } @else if (!existing() && init().range && !readOnlyReason()) {
+          <button type="button" class="btn-danger mr-auto" (click)="clearPeriod('selection')" [disabled]="action.busy()">Supprimer la sélection</button>
         }
         <button type="button" class="btn-secondary" (click)="closed.emit()" [disabled]="action.busy()">Annuler</button>
         @if (!readOnlyReason()) {
@@ -343,17 +347,59 @@ export class PlanningSlotDialog implements OnInit {
     this.saved.emit();
   }
 
-  /** Alerte d'écrasement : liste les plannings existants qui seront remplacés sur la période. */
-  private confirmOverwrite(existing: PlanningDto[]): Promise<boolean> {
-    const lines = existing
+  /**
+   * Suppression de la période saisie (un créneau d'une plage, ou la sélection par glisser) :
+   * les plannings sont retirés sur cette période, les parties hors période sont conservées.
+   */
+  async clearPeriod(kind: 'creneau' | 'selection'): Promise<void> {
+    this.validation.set(null);
+    const nigend = this.nigend();
+    if (!nigend) return this.invalid('Sélectionnez un personnel.');
+    const periode = {
+      nigend,
+      date_debut: this.dateDebut,
+      id_creneaux_debut: Number(this.creneauDebut),
+      date_fin: this.dateFin,
+      id_creneaux_fin: Number(this.creneauFin),
+    };
+    const v = validatePlageBounds(periode);
+    if (v) return this.invalid(v.message);
+    const ov = await this.action.run(() => this.api.overlaps(periode, { silent: true }));
+    if (!ov.ok) return;
+    if (!ov.value.length) return this.invalid('Aucun planning sur la période sélectionnée : rien à supprimer.');
+    if (this.auth.profil() === Profil.NEGOCIATEUR && ov.value.some((p) => RESTRICTED_POSITIONS.includes(p.id_pos_service))) {
+      return this.invalid('La période contient une plage Alerte ou Formateur, que seul un référent ou le GIGN peut supprimer.');
+    }
+    const span = `du ${fmt(periode.date_debut)} (${cr(periode.id_creneaux_debut)}) au ${fmt(periode.date_fin)} (${cr(periode.id_creneaux_fin)})`;
+    const ok = await this.confirm.ask(
+      kind === 'creneau' ? 'Supprimer ce créneau' : 'Supprimer la sélection',
+      `Le planning sera supprimé sur la période ${span}.\n\n` +
+        `${ov.value.length === 1 ? 'Planning concerné' : `${ov.value.length} plannings concernés`} :\n${this.describe(ov.value)}\n\n` +
+        `Les parties en dehors de cette période sont conservées.`,
+      { confirmLabel: 'Supprimer', danger: true },
+    );
+    if (!ok) return;
+    const r = await this.action.run(() => this.api.clear(periode, { silent: true }));
+    if (!r.ok) return;
+    this.toasts.success(kind === 'creneau' ? 'Créneau supprimé' : 'Sélection supprimée', `${r.value.supprimees} planning(s) concerné(s), le reste est conservé.`);
+    this.saved.emit();
+  }
+
+  private describe(list: PlanningDto[]): string {
+    const lines = list
       .slice(0, 6)
       .map((p) => `• du ${fmt(p.date_debut)} (${cr(p.id_creneaux_debut)}) au ${fmt(p.date_fin)} (${cr(p.id_creneaux_fin)}) — ${this.ref.libelle(p.id_pos_service)}`);
-    if (existing.length > 6) lines.push(`• … et ${existing.length - 6} autre(s)`);
+    if (list.length > 6) lines.push(`• … et ${list.length - 6} autre(s)`);
+    return lines.join('\n');
+  }
+
+  /** Alerte d'écrasement : liste les plannings existants qui seront remplacés sur la période. */
+  private confirmOverwrite(existing: PlanningDto[]): Promise<boolean> {
     return this.confirm.ask(
       'Plannings existants sur la période',
       `${existing.length === 1 ? 'Le planning suivant sera écrasé' : `Les ${existing.length} plannings suivants seront écrasés`} ` +
         `sur la période du ${fmt(this.dateDebut)} (${cr(this.creneauDebut)}) au ${fmt(this.dateFin)} (${cr(this.creneauFin)}) :\n\n` +
-        `${lines.join('\n')}\n\nLes parties en dehors de cette période sont conservées.`,
+        `${this.describe(existing)}\n\nLes parties en dehors de cette période sont conservées.`,
       { confirmLabel: 'Écraser et enregistrer', danger: true },
     );
   }

@@ -201,6 +201,48 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_MARTINIQUE).get(`/planning/overlaps?${new URLSearchParams({ nigend: NEGO_IDF, date_debut: future(520), id_creneaux_debut: '1', date_fin: future(522), id_creneaux_fin: '2' })}`)).status).toBe(403);
       await as(REFERENT_IDF).del(`/planning/${alerte.body.id_planning}`);
     });
+    it('suppression d’un créneau ou d’une sélection : parties hors période conservées', async () => {
+      const list = async (d1: number, d2: number) =>
+        ((await as(REFERENT_IDF).get(`/planning/overlaps?${new URLSearchParams({ nigend: NEGO_IDF, date_debut: future(d1), id_creneaux_debut: '1', date_fin: future(d2), id_creneaux_fin: '2' })}`)).body as {
+          date_debut: string; id_creneaux_debut: number; date_fin: string; id_creneaux_fin: number; id_pos_service: number;
+        }[]).map((p) => [p.date_debut, p.id_creneaux_debut, p.date_fin, p.id_creneaux_fin, p.id_pos_service]);
+      await as(REFERENT_IDF).post('/planning', { ...base, date_debut: future(530), date_fin: future(535) }); // Disponible
+      await as(REFERENT_IDF).post('/planning', { ...base, date_debut: future(536), date_fin: future(539), id_pos_service: 3 }); // En service
+
+      // Un seul créneau : la nuit du J532
+      const one = await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(532), id_creneaux_debut: 2, date_fin: future(532), id_creneaux_fin: 2 });
+      expect(one.status).toBe(200);
+      expect(one.body).toEqual({ supprimees: 1, conservees: 2 });
+      expect(await list(530, 539)).toEqual([
+        [future(530), 1, future(532), 1, 1],
+        [future(533), 1, future(535), 2, 1],
+        [future(536), 1, future(539), 2, 3],
+      ]);
+
+      // Sélection à cheval sur deux plages : du J534 Nuit au J537 Jour
+      const sel = await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(534), id_creneaux_debut: 2, date_fin: future(537), id_creneaux_fin: 1 });
+      expect(sel.body).toEqual({ supprimees: 2, conservees: 2 });
+      expect(await list(530, 539)).toEqual([
+        [future(530), 1, future(532), 1, 1],
+        [future(533), 1, future(534), 1, 1],
+        [future(537), 2, future(539), 2, 3],
+      ]);
+
+      // Période vide : rien à supprimer
+      expect((await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(545), id_creneaux_debut: 1, date_fin: future(546), id_creneaux_fin: 2 })).body).toEqual({ supprimees: 0, conservees: 0 });
+      // Nettoyage
+      await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(530), id_creneaux_debut: 1, date_fin: future(539), id_creneaux_fin: 2 });
+      expect(await list(530, 539)).toEqual([]);
+    });
+    it('suppression : BR-PLA-4, périmètre, borne M-1', async () => {
+      const alerte = await as(REFERENT_IDF).post('/planning', { ...base, date_debut: future(550), date_fin: future(551), id_pos_service: 4 });
+      const r = await as(NEGO_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(550), id_creneaux_debut: 1, date_fin: future(550), id_creneaux_fin: 1 });
+      expect(r.body.code).toBe('RNI-1008');
+      expect((await as(GIGN).get(`/planning/${alerte.body.id_planning}`)).status).toBe(200);
+      expect((await as(REFERENT_MARTINIQUE).post('/planning/clear', { nigend: NEGO_IDF, date_debut: future(550), id_creneaux_debut: 1, date_fin: future(550), id_creneaux_fin: 1 })).status).toBe(403);
+      expect((await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: '2020-01-01', id_creneaux_debut: 1, date_fin: '2020-01-02', id_creneaux_fin: 1 })).body.code).toBe('RNI-1007');
+      await as(REFERENT_IDF).del(`/planning/${alerte.body.id_planning}`);
+    });
     it('recherche serveur dans tout le périmètre : seuls les agents et régions correspondants', async () => {
       const month = new Date().toISOString().slice(0, 7);
       // Agent de Grand Est : trouvé par le GIGN (national)…

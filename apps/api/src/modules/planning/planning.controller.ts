@@ -67,6 +67,13 @@ export class PlanningController {
     return this.service.create(user, body);
   }
 
+  /** Suppression d'un créneau ou d'une période sélectionnée (parties hors période conservées). */
+  @Post('clear')
+  @HttpCode(200)
+  clear(@CurrentUser() user: RniUser, @Body() body: OverlapQuery) {
+    return this.service.clearPeriod(user, body);
+  }
+
   /** Scission d'une plage existante (BR-PLA-9/10). */
   @Post('insert')
   insert(@CurrentUser() user: RniUser, @Body() body: InsertPlanningBody) {

@@ -5,6 +5,7 @@ import { TestBed } from '@angular/core/testing';
 import { Creneau, PlanningDto } from '@rni/shared';
 import { AuthService } from '../../../core/auth/auth.service';
 import { ReferentielService } from '../../../core/referentiel/referentiel.service';
+import { ConfirmService } from '../../../shared/ui/confirm';
 import { PlanningFormInit, PlanningSlotDialog } from './planning-slot-dialog';
 
 /** Plage multi-jours, par ex. créée par glisser-déposer : du 05/12 Jour au 12/12 Jour, En service. */
@@ -77,5 +78,55 @@ describe('PlanningSlotDialog : clic sur une demi-journée d’une plage', () => 
   it('plage d’un seul créneau : modification directe de la plage', async () => {
     await open({ planning: { ...plage, date_fin: '2030-12-05' }, slot: { date: '2030-12-05', creneau: Creneau.JOUR } });
     expect(el.querySelector('[role=radio][aria-checked=true]')!.textContent!.trim()).toBe('Modifier la plage');
+  });
+
+  describe('suppression', () => {
+    const button = (label: string) => Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.trim() === label) as HTMLButtonElement | undefined;
+    const flushAsync = () => new Promise((r) => setTimeout(r));
+
+    it('« Supprimer ce créneau » : aperçu, confirmation, puis suppression de la seule demi-journée', async () => {
+      const fixture = await open({ planning: plage, slot: { date: '2030-12-08', creneau: Creneau.NUIT } });
+      const ask = vi.spyOn(TestBed.inject(ConfirmService), 'ask').mockResolvedValue(true);
+      expect(button('Supprimer toute la plage')).toBeUndefined();
+      button('Supprimer ce créneau')!.click();
+      const ov = ctrl.expectOne((r) => r.url === '/rni/api/planning/overlaps');
+      expect(ov.request.params.get('date_debut')).toBe('2030-12-08');
+      expect(ov.request.params.get('id_creneaux_debut')).toBe('2');
+      ov.flush([plage]);
+      await flushAsync();
+      expect(ask).toHaveBeenCalledWith('Supprimer ce créneau', expect.stringContaining('du 08/12/2030 (Nuit) au 08/12/2030 (Nuit)'), expect.anything());
+      const clear = ctrl.expectOne('/rni/api/planning/clear');
+      expect(clear.request.body).toEqual({ nigend: '200074', date_debut: '2030-12-08', id_creneaux_debut: 2, date_fin: '2030-12-08', id_creneaux_fin: 2 });
+      let saved = false;
+      fixture.componentInstance.saved.subscribe(() => (saved = true));
+      clear.flush({ supprimees: 1, conservees: 2 });
+      await flushAsync();
+      expect(saved).toBe(true);
+    });
+
+    it('« Toute la plage » : bouton de suppression de la plage entière', async () => {
+      const fixture = await open({ planning: plage, slot: { date: '2030-12-08', creneau: Creneau.NUIT } });
+      (Array.from(el.querySelectorAll('[role=radio]')).find((b) => b.textContent!.includes('Toute la plage')) as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(button('Supprimer toute la plage')).toBeDefined();
+      expect(button('Supprimer ce créneau')).toBeUndefined();
+    });
+
+    it('« Supprimer la sélection » après un glisser ; sélection vide : message, aucune suppression', async () => {
+      const fixture = await open({ user: { nigend: '200074', label: 'x' }, range: { date_debut: '2030-12-20', id_creneaux_debut: 2, date_fin: '2030-12-22', id_creneaux_fin: 1 } });
+      const ask = vi.spyOn(TestBed.inject(ConfirmService), 'ask');
+      button('Supprimer la sélection')!.click();
+      ctrl.expectOne((r) => r.url === '/rni/api/planning/overlaps').flush([]);
+      await flushAsync();
+      fixture.detectChanges();
+      expect(ask).not.toHaveBeenCalled();
+      ctrl.expectNone('/rni/api/planning/clear');
+      expect(el.textContent).toContain('rien à supprimer');
+    });
+
+    it('création simple (sans sélection) : pas de bouton de suppression', async () => {
+      await open({ user: { nigend: '200074', label: 'x' }, date: '2030-12-20', creneau: Creneau.JOUR });
+      expect(button('Supprimer la sélection')).toBeUndefined();
+    });
   });
 });

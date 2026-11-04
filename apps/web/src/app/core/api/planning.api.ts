@@ -47,6 +47,10 @@ export class PlanningApi {
       ...ctx(opts),
     });
   }
+  /** Supprime le planning d'un agent sur une période (parties hors période conservées). */
+  clear(p: Pick<PlanningInputDto, 'nigend' | 'date_debut' | 'id_creneaux_debut' | 'date_fin' | 'id_creneaux_fin'>, opts?: RequestOptions) {
+    return this.http.post<{ supprimees: number; conservees: number }>(`${API}/planning/clear`, p, ctx(opts));
+  }
   remove(id: number, opts?: RequestOptions) {
     return this.http.delete<void>(`${API}/planning/${id}`, ctx(opts));
   }
