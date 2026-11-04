@@ -84,7 +84,7 @@ navigateur ──► reverse-proxy SSO (en-têtes nigend, cn, title…) ──�
 
 | Dossier | Contenu |
 |---|---|
-| `common/auth` | `AuthGuard` global (BR-AUTH-1/2 : 401 sans `nigend` ou nigend non habilité ; matrice déclarative `@Profiles`), `PerimetreService` (BR-AUTH-6), simulation SSO de dev |
+| `common/auth` | `AuthGuard` global (BR-AUTH-1/2 : 401 sans `nigend` ou nigend non habilité ; matrice déclarative `@Profiles`), `PerimetreService` (BR-AUTH-6 : toutes les régions pour le GIGN, sa région seule pour les autres profils), simulation SSO de dev |
 | `common` | Filtre d'erreurs (BR-SEC-2 : `t_admin_logs` + libellé `t_admin_messages`, repli si la base tombe), intercepteur d'audit Splunk (BR-SEC-1 : `t_admin_log_splunk`) |
 | `database` | Modèles Sequelize, accès SQL **paramétré** (`Db`) |
 | `modules/planning` | Calendrier mensuel, GeoJSON de la carte, création / modification / suppression / **insertion transactionnelle** |
@@ -116,7 +116,7 @@ authentifié, 403 non autorisé / hors périmètre, 404 introuvable.
 
 - `init/01-schema.sql` : tables, vues `v_personnel_to_ref_user` et `v_user_detail`.
 - `init/02-referentiels.sql` : profils, positions (couleurs), créneaux, grades, régions INSEE et
-  voisinages, centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
+  voisinages (non utilisés depuis la restriction de BR-AUTH-6), centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
 - `init/03-param-app.sql` : paramétrage de développement ; `env/param-app.template.sql` pour la prod.
 - `migrations/*.sql` : évolutions idempotentes à appliquer sur une base existante (`pnpm db:migrate`).
 - `dev/90-seed-dev.sql` : **jeu de données fictif** (unités, ~110 personnels RPSI, comptes, plannings
@@ -228,8 +228,11 @@ Les autocomplétions (RPSI, personnel du planning) utilisent les mêmes index et
 
 Le cahier des charges laisse quelques points ouverts ; voici les choix retenus :
 
-1. **Référent / référent adjoint** : lecture sur la région + régions voisines (BR-AUTH-6), mais
-   **écritures** (planning, personnel) limitées à **sa région**.
+1. **Périmètre géographique (BR-AUTH-6, règle modifiée)** : **seul le profil GIGN voit toutes les
+   régions** ; tous les autres profils (référent, référent adjoint, négociateur, OMS, lecture seule,
+   fiche de crise) ne voient **que leur région** — carte, planning, compteurs, recherche, listes.
+   Les régions voisines (`ref_nrb_region_r22`) ne sont plus utilisées ; la table est conservée.
+   Les écritures (planning, personnel) restent limitées à sa région.
 2. **Négociateur** : en plus de BR-PLA-4, il ne peut pas **supprimer** une plage Alerte / Formateur.
 3. **Insertion** : les plages avant / après gardent l'adresse de la plage initiale ; la période insérée
    prend l'adresse saisie, sinon celle de la plage initiale. La nouvelle position doit différer (RNI-1007).

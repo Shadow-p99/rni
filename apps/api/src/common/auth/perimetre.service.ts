@@ -1,36 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import { Perimetre, perimetreOf } from '@rni/shared';
-import { Db } from '../../database/db.service.js';
+import { perimetreOf } from '@rni/shared';
 import { BusinessException } from '../business.exception.js';
 import type { RniUser } from './current-user.js';
 
-/** BR-AUTH-6 : périmètre géographique (région, régions limitrophes, national). */
+/** BR-AUTH-6 : périmètre géographique — toutes les régions pour le GIGN, sa région seule pour les autres profils. */
 @Injectable()
 export class PerimetreService {
-  private neighbours: Map<number, number[]> | null = null;
-  private loadedAt = 0;
-
-  constructor(private readonly db: Db) {}
-
-  async neighboursOf(idRegion: number): Promise<number[]> {
-    if (!this.neighbours || Date.now() - this.loadedAt > 10 * 60_000) {
-      const rows = await this.db.select<{ id_region: number; id_region_voisine: number }>(
-        'SELECT id_region, id_region_voisine FROM ref_nrb_region_r22',
-      );
-      const map = new Map<number, number[]>();
-      for (const r of rows) map.set(r.id_region, [...(map.get(r.id_region) ?? []), r.id_region_voisine]);
-      this.neighbours = map;
-      this.loadedAt = Date.now();
-    }
-    return this.neighbours.get(idRegion) ?? [];
-  }
-
+  /** Régions visibles ; `null` = national. Un utilisateur non GIGN sans région ne voit rien. */
   async visibleRegions(idProfil: number, idRegion: number | null): Promise<number[] | null> {
-    const p: Perimetre = perimetreOf(idProfil);
-    if (p === 'national') return null;
-    if (idRegion == null) return [];
-    if (p === 'region') return [idRegion];
-    return [idRegion, ...(await this.neighboursOf(idRegion))];
+    if (perimetreOf(idProfil) === 'national') return null;
+    return idRegion == null ? [] : [idRegion];
   }
 
   /** La région est-elle visible par l'utilisateur ? */

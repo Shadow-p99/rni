@@ -82,15 +82,12 @@ export function listableProfils(current: number): Profil[] {
 }
 
 /**
- * BR-AUTH-6 : nature du périmètre géographique.
- *  - `national` : toute la France (GIGN, lecture seule technique) ;
- *  - `region+voisines` : région + régions limitrophes (3, 4, 5, 7) ;
- *  - `region` : région seule (OMS).
+ * BR-AUTH-6 : périmètre géographique.
+ *  - `national` : toutes les régions — **profil GIGN uniquement** ;
+ *  - `region` : la région de l'utilisateur seule — tous les autres profils.
  */
-export type Perimetre = 'national' | 'region+voisines' | 'region';
+export type Perimetre = 'national' | 'region';
 
 export function perimetreOf(id: number): Perimetre {
-  if (id === Profil.GIGN || id === Profil.LECTURE_SEULE) return 'national';
-  if (id === Profil.OMS) return 'region';
-  return 'region+voisines';
+  return id === Profil.GIGN ? 'national' : 'region';
 }

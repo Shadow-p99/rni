@@ -66,11 +66,24 @@ describe('API RNI (e2e)', () => {
   });
 
   describe('périmètre géographique (BR-AUTH-6)', () => {
-    it('GIGN national, référent région + voisines, OMS région seule', async () => {
+    it('seul le GIGN voit toutes les régions ; tous les autres profils, leur région seule', async () => {
       expect((await as(GIGN).get('/users/me')).body.regions_visibles).toBeNull();
-      const ref = (await as(REFERENT_IDF).get('/users/me')).body.regions_visibles as number[];
-      expect(ref).toEqual(expect.arrayContaining([11, 24, 27, 28, 32, 44]));
+      expect((await as(REFERENT_IDF).get('/users/me')).body.regions_visibles).toEqual([11]);
+      expect((await as(NEGO_IDF).get('/users/me')).body.regions_visibles).toEqual([11]);
+      expect((await as(LECTURE).get('/users/me')).body.regions_visibles).toEqual([11]);
       expect((await as(OMS).get('/users/me')).body.regions_visibles).toEqual([84]);
+      expect((await as(FICHE_CRISE).get('/users/me')).body.regions_visibles).toEqual([93]);
+      expect((await as(REFERENT_IDF).get('/region')).body.map((r: { id_region: number }) => r.id_region)).toEqual([11]);
+      expect((await as(GIGN).get('/region')).body.length).toBe(18);
+    });
+    it('régions voisines hors périmètre : carte, compteurs, calendrier', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      const fc = (await as(REFERENT_IDF).get('/planning/geojson')).body;
+      expect(fc.features.every((f: { properties: { id_region: number } }) => f.properties.id_region === 11)).toBe(true);
+      expect((await as(REFERENT_IDF).get('/region/getNbPositionServiceByRegion')).body.map((r: { id_region: number }) => r.id_region)).toEqual([11]);
+      expect((await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&region=24`)).status).toBe(403);
+      const lecture = (await as(LECTURE).get('/planning/geojson')).body;
+      expect(lecture.features.every((f: { properties: { id_region: number } }) => f.properties.id_region === 11)).toBe(true);
     });
     it('la carte ne renvoie que les personnels du périmètre', async () => {
       const fc = (await as(OMS).get('/planning/geojson')).body;
@@ -141,21 +154,24 @@ describe('API RNI (e2e)', () => {
     });
     it('recherche serveur dans tout le périmètre : seuls les agents et régions correspondants', async () => {
       const month = new Date().toISOString().slice(0, 7);
-      // Agent d'une région voisine, recherché depuis l'Île-de-France
+      // Agent de Grand Est : trouvé par le GIGN (national)…
       const target = (await as(GIGN).get('/users?region=44&profil=4&size=1')).body.items[0] as { nom: string; prenom: string; nigend: string };
-      const r = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
+      const r = await as(GIGN).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
       expect(r.status).toBe(200);
       expect(r.body.filter).toEqual({ matches: 1, truncated: false });
       expect(r.body.regions).toHaveLength(1);
       expect(r.body.regions[0].id_region).toBe(44);
       expect(r.body.regions[0].users.map((u: { nigend: string }) => u.nigend)).toEqual([target.nigend]);
       // Plusieurs mots, dans le désordre
-      const byName = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.prenom + ' ' + target.nom)}`);
+      const byName = await as(GIGN).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.prenom + ' ' + target.nom)}`);
       expect(byName.body.regions.flatMap((x: { users: { nigend: string }[] }) => x.users.map((u) => u.nigend))).toContain(target.nigend);
-      // Hors périmètre (OMS : sa région seule)
-      const oms = await as(OMS).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
-      expect(oms.body.regions).toEqual([]);
-      expect(oms.body.filter.matches).toBe(0);
+      // …mais pas par un référent d'une autre région (même voisine)
+      const ref = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
+      expect(ref.body.regions).toEqual([]);
+      expect(ref.body.filter.matches).toBe(0);
+      // Recherche dans sa propre région
+      const own = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${NEGO_IDF}`);
+      expect(own.body.regions.map((x: { id_region: number }) => x.id_region)).toEqual([11]);
     });
     it('filtre par position au créneau courant (0 = sans planning)', async () => {
       const month = new Date().toISOString().slice(0, 7);
@@ -170,11 +186,12 @@ describe('API RNI (e2e)', () => {
       expect(both.body.filter.matches).toBe(dispo + sans);
       expect((await as(GIGN).get(`/planning/timetable?month=${month}&positions=x`)).body.code).toBe('RNI-1002');
     });
-    it('sans filtre : toutes les régions visibles, pas de bloc filter', async () => {
+    it('sans filtre : régions du périmètre, pas de bloc filter', async () => {
       const month = new Date().toISOString().slice(0, 7);
       const r = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}`);
       expect(r.body.filter).toBeUndefined();
-      expect(r.body.regions.length).toBe(6);
+      expect(r.body.regions.map((x: { id_region: number }) => x.id_region)).toEqual([11]);
+      expect((await as(GIGN).get(`/planning/timetable?month=${month}`)).body.regions.length).toBe(18);
     });
     it('calendrier mensuel tronqué aux bornes du mois (BR-PLA-2)', async () => {
       const month = new Date().toISOString().slice(0, 7);

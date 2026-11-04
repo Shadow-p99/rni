@@ -32,7 +32,9 @@ describe('profils', () => {
   });
   it('périmètre (BR-AUTH-6)', () => {
     expect(perimetreOf(Profil.GIGN)).toBe('national');
-    expect(perimetreOf(Profil.OMS)).toBe('region');
-    expect(perimetreOf(Profil.NEGOCIATEUR)).toBe('region+voisines');
+    // Seul le GIGN voit toutes les régions ; tous les autres profils, leur région seule
+    for (const p of [Profil.LECTURE_SEULE, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.FICHE_CRISE, Profil.OMS, Profil.REFERENT_ADJOINT]) {
+      expect(perimetreOf(p)).toBe('region');
+    }
   });
 });
