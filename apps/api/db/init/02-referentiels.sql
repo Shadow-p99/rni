@@ -240,7 +240,7 @@ INSERT INTO t_admin_messages (code_message, libelle, type) VALUES
   ('RNI-1004', 'L''élément demandé est introuvable.', 'ERREUR'),
   ('RNI-1005', 'Un créneau existe déjà sur la période demandée.', 'AVERTISSEMENT'),
   ('RNI-1006', 'L''insertion dépasse la plage du planning initial.', 'AVERTISSEMENT'),
-  ('RNI-1007', 'Insertion impossible : plage identique à l''initiale, position inchangée ou date antérieure au mois précédent.', 'AVERTISSEMENT'),
+  ('RNI-1007', 'Insertion impossible : plage identique à l''initiale, position inchangée ou date figée du planning.', 'AVERTISSEMENT'),
   ('RNI-1008', 'Vous n''êtes pas autorisé à effectuer cette action.', 'ERREUR'),
   ('RNI-1009', 'Cet élément est hors de votre périmètre.', 'ERREUR'),
   ('RNI-1010', 'Cette fiche est clôturée ou ne vous appartient pas.', 'ERREUR'),

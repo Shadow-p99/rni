@@ -1,4 +1,4 @@
-import { computeInsertion, validatePlageBounds, minPlanningDate, checkPositionAllowed, clipPlage, splitAround } from './planning-rules.js';
+import { computeInsertion, validatePlageBounds, minPlanningDate, checkPositionAllowed, clipPlage, splitAround, parseJoursGlissants } from './planning-rules.js';
 import { ErrorCode } from './errors.js';
 import { toSlot } from './creneaux.js';
 import { Profil } from './profils.js';
@@ -7,7 +7,20 @@ import { PosService } from './positions.js';
 const today = new Date(2026, 2, 10); // 10 mars 2026
 
 describe('validatePlageBounds (BR-PLA-3)', () => {
-  it('borne minimale M-1', () => {
+  it('borne glissante (t_param_app)', () => {
+    const d = new Date(2026, 2, 5);
+    expect(minPlanningDate(d, 10)).toBe('2026-02-23');
+    expect(minPlanningDate(d, 0)).toBe('2026-03-05');
+    const v = validatePlageBounds({ date_debut: '2026-02-22', id_creneaux_debut: 2, date_fin: '2026-02-23', id_creneaux_fin: 1 }, d, 10);
+    expect(v?.code).toBe('RNI-1007');
+    expect(v?.message).toContain('23/02/2026');
+    expect(validatePlageBounds({ date_debut: '2026-02-23', id_creneaux_debut: 1, date_fin: '2026-02-23', id_creneaux_fin: 1 }, d, 10)).toBeNull();
+    expect(parseJoursGlissants('15')).toBe(15);
+    expect(parseJoursGlissants(' 0 ')).toBe(0);
+    for (const bad of [null, '', 'abc', '-3', '2.5']) expect(parseJoursGlissants(bad)).toBeNull();
+  });
+
+  it('borne minimale M-1 (paramètre absent)', () => {
     expect(minPlanningDate(today)).toBe('2026-02-01');
     expect(validatePlageBounds({ date_debut: '2026-01-31', id_creneaux_debut: 1, date_fin: '2026-02-02', id_creneaux_fin: 1 }, today)?.code).toBe(ErrorCode.INSERTION_INTERDITE);
     expect(validatePlageBounds({ date_debut: '2026-02-01', id_creneaux_debut: 1, date_fin: '2026-02-02', id_creneaux_fin: 1 }, today)).toBeNull();

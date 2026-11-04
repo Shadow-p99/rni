@@ -16,16 +16,46 @@ export interface RuleViolation {
   message: string;
 }
 
-/** BR-PLA-3 : borne minimale = premier jour du mois précédent (M-1). */
-export function minPlanningDate(today: Date = new Date()): string {
+/** Clé `t_param_app` : nombre de jours glissants pendant lesquels le planning passé reste modifiable. */
+export const PARAM_JOURS_GLISSANTS = 'rni.planning.jours_glissants';
+
+/**
+ * Lecture de la valeur du paramètre : entier ≥ 0, sinon `null` (paramètre absent ou invalide :
+ * la règle historique M-1 s'applique).
+ */
+export function parseJoursGlissants(raw: string | null | undefined): number | null {
+  if (raw == null || raw.trim() === '') return null;
+  const n = Number(raw.trim());
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/**
+ * BR-PLA-3 : borne minimale de saisie. Les dates antérieures sont **figées** (ni création,
+ * ni modification, ni suppression).
+ * - `joursGlissants` défini : aujourd'hui − N jours (fenêtre glissante, `t_param_app`) ;
+ * - sinon : premier jour du mois précédent (M-1).
+ */
+export function minPlanningDate(today: Date = new Date(), joursGlissants: number | null = null): string {
+  if (joursGlissants != null) return localDateIso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - joursGlissants));
   return localDateIso(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+}
+
+/** Message affiché lorsqu'une date est figée. */
+export function frozenMessage(minDate: string, joursGlissants: number | null): string {
+  const [y, m, d] = minDate.split('-');
+  const regle = joursGlissants != null ? `${joursGlissants} jour(s) glissant(s)` : 'mois précédent';
+  return `Le planning est figé avant le ${d}/${m}/${y} (${regle}).`;
 }
 
 /**
  * BR-PLA-3 : contrôles de cohérence d'une plage (dates obligatoires, ordre, borne M-1,
  * interdiction « même jour, début Nuit / fin Jour »). Partagé client / API.
  */
-export function validatePlageBounds(p: Partial<PlageBounds>, today: Date = new Date()): RuleViolation | null {
+export function validatePlageBounds(
+  p: Partial<PlageBounds>,
+  today: Date = new Date(),
+  joursGlissants: number | null = null,
+): RuleViolation | null {
   if (!p.date_debut || !p.date_fin || p.id_creneaux_debut == null || p.id_creneaux_fin == null) {
     return { code: ErrorCode.PARAMETRE_MANQUANT, message: 'Les dates et créneaux de début et de fin sont obligatoires.' };
   }
@@ -45,11 +75,9 @@ export function validatePlageBounds(p: Partial<PlageBounds>, today: Date = new D
   ) {
     return { code: ErrorCode.PARAMETRE_INVALIDE, message: 'Un même jour ne peut pas commencer de Nuit et finir de Jour.' };
   }
-  if (dayNumber(p.date_debut) < dayNumber(minPlanningDate(today))) {
-    return {
-      code: ErrorCode.INSERTION_INTERDITE,
-      message: 'La date de début ne peut pas être antérieure au premier jour du mois précédent.',
-    };
+  const min = minPlanningDate(today, joursGlissants);
+  if (dayNumber(p.date_debut) < dayNumber(min)) {
+    return { code: ErrorCode.INSERTION_INTERDITE, message: frozenMessage(min, joursGlissants) };
   }
   return null;
 }
@@ -90,8 +118,9 @@ export function computeInsertion(
   outer: PlageWithPosition,
   inner: PlageWithPosition,
   today: Date = new Date(),
+  joursGlissants: number | null = null,
 ): InsertionResult {
-  const bounds = validatePlageBounds(inner, today);
+  const bounds = validatePlageBounds(inner, today, joursGlissants);
   if (bounds) return { ok: false, violation: bounds };
 
   const o = plageSlots(outer);

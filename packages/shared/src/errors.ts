@@ -42,7 +42,7 @@ export const DEFAULT_MESSAGES: Record<ErrorCode, { libelle: string; type: Messag
   'RNI-1006': { libelle: "L'insertion dépasse la plage du planning initial.", type: 'AVERTISSEMENT' },
   'RNI-1007': {
     libelle:
-      "Insertion impossible : plage identique à l'initiale, position inchangée ou date antérieure au mois précédent.",
+      "Insertion impossible : plage identique à l'initiale, position inchangée ou date figée du planning.",
     type: 'AVERTISSEMENT',
   },
   'RNI-1008': { libelle: "Vous n'êtes pas autorisé à effectuer cette action.", type: 'ERREUR' },

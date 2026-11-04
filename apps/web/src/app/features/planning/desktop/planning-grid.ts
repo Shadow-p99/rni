@@ -1,5 +1,6 @@
-import { Component, HostListener, input, output } from '@angular/core';
-import { Creneau, PlageBounds, TimetableUserDto } from '@rni/shared';
+import { Component, HostListener, computed, inject, input, output } from '@angular/core';
+import { Creneau, PlageBounds, TimetableUserDto, toSlot } from '@rni/shared';
+import { ConfigService } from '../../../core/config/config.service';
 import { RangeSelection, rangeToPlage } from './range-selection';
 import { HalfCell } from '../planning-cells';
 import { PlanningRow } from './planning-desktop.store';
@@ -68,9 +69,10 @@ export interface RangeSelect {
                     [class.border-b]="h.creneau === 1"
                     [class.border-white]="h.creneau === 1"
                     [class.rni-cell-selected]="selected(row.user.id_user, h.slot)"
+                    [class.rni-cell-frozen]="h.slot < minSlot()"
                     [class.cursor-pointer]="row.editable"
                     [class.touch-none]="row.editable"
-                    [style.background]="h.color || (h.creneau === 1 ? '#e2e8f0' : '#cbd5e1')"
+                    [style.background-color]="h.color || (h.creneau === 1 ? '#e2e8f0' : '#cbd5e1')"
                     [title]="title(h)"
                     [attr.aria-label]="title(h)"
                     [attr.data-user]="row.user.id_user"
@@ -97,6 +99,10 @@ export class PlanningGrid {
   readonly libelle = input<(id: number) => string>((id) => String(id));
   readonly cellClick = output<CellClick>();
   readonly rangeSelect = output<RangeSelect>();
+
+  private readonly config = inject(ConfigService);
+  /** BR-PLA-3 : premier créneau modifiable ; les demi-cases antérieures sont figées (consultation). */
+  protected readonly minSlot = computed(() => toSlot(this.config.planningMinDate(), Creneau.JOUR));
 
   private readonly selection = new RangeSelection();
   /** Demi-case de départ (pour le simple clic) et agent concerné. */
@@ -125,7 +131,9 @@ export class PlanningGrid {
   onPointerMove(e: PointerEvent): void {
     if (!this.selection.active()) return;
     const at = this.slotAt(document.elementFromPoint(e.clientX, e.clientY));
-    if (at) this.selection.move(at.userId, at.slot);
+    // Planning figé : pas de sélection depuis une case figée, et la sélection s'arrête à la borne
+    if (!at || !this.origin || this.origin.half.slot < this.minSlot()) return;
+    this.selection.move(at.userId, Math.max(at.slot, this.minSlot()));
   }
 
   @HostListener('document:pointerup')
@@ -155,7 +163,8 @@ export class PlanningGrid {
     const date = h.date.split('-').reverse().join('/');
     const cr = h.creneau === Creneau.JOUR ? 'Jour' : 'Nuit';
     const p = h.planning;
-    if (!p) return `${date} ${cr} — aucun planning`;
-    return `${date} ${cr} — ${this.libelle()(p.id_pos_service)}${p.adresse_temp ? ' — ' + p.adresse_temp : ''}`;
+    const fige = h.slot < this.minSlot() ? ' (figé)' : '';
+    if (!p) return `${date} ${cr} — aucun planning${fige}`;
+    return `${date} ${cr} — ${this.libelle()(p.id_pos_service)}${p.adresse_temp ? ' — ' + p.adresse_temp : ''}${fige}`;
   }
 }

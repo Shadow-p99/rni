@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { ErrorCode } from '@rni/shared';
+import { ErrorCode, PARAM_JOURS_GLISSANTS, parseJoursGlissants } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
 import { ParamApp } from '../../database/models/index.js';
 
@@ -52,5 +52,10 @@ export class ParamService {
       .split(',')
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0);
+  }
+
+  /** Nombre de jours glissants du planning (`null` : règle M-1). */
+  async joursGlissants(): Promise<number | null> {
+    return parseJoursGlissants(await this.get(PARAM_JOURS_GLISSANTS));
   }
 }

@@ -4,6 +4,8 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
+import { Db } from '../src/database/db.service.js';
+import { ParamService } from '../src/modules/external/param.service.js';
 
 /** Identités du jeu de données fictif (db/dev/90-seed-dev.sql). */
 const GIGN = '100001';
@@ -293,6 +295,77 @@ describe('API RNI (e2e)', () => {
           expect(p.affiche.date_debut >= r.body.first).toBe(true);
           expect(p.affiche.date_fin <= r.body.last).toBe(true);
         }
+    });
+  });
+
+  describe('planning figé : jours glissants (t_param_app)', () => {
+    const setJours = async (v: string) => {
+      await app.get(Db).sequelize.query("UPDATE t_param_app SET valeur = :v WHERE cle_param_app = 'rni.planning.jours_glissants'", { replacements: { v } });
+      app.get(ParamService).invalidate();
+    };
+    const past = (n: number) => future(-n);
+    let agent: { id_user: number; nigend: string };
+
+    beforeAll(async () => {
+      // Négociateur temporaire d'Île-de-France (sans planning)
+      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999901'`);
+      agent = (await app.get(Db).one<{ id_user: number; nigend: string }>(
+        `INSERT INTO ref_user (nigend, nom, prenom, id_profil, id_region, code_unite)
+         SELECT '999901', 'TEST', 'Figé', 4, id_region, code_unite FROM ref_user WHERE nigend = '${REFERENT_IDF}'
+         RETURNING id_user, nigend`,
+      ))!;
+      expect(agent).toBeTruthy();
+    });
+    afterAll(async () => {
+      await app.get(Db).sequelize.query('DELETE FROM planning WHERE id_user = :id', { replacements: { id: agent.id_user } });
+      await app.get(Db).sequelize.query('DELETE FROM ref_user WHERE id_user = :id', { replacements: { id: agent.id_user } });
+      await setJours('30');
+    });
+
+    it('borne glissante : refus avant aujourd’hui − N, accepté à la borne', async () => {
+      await setJours('3');
+      const body = { nigend: agent.nigend, id_creneaux_debut: 1, id_creneaux_fin: 2, id_pos_service: 1 };
+      const refus = await as(REFERENT_IDF).post('/planning', { ...body, date_debut: past(4), date_fin: past(4) });
+      expect(refus.body.code).toBe('RNI-1007');
+      expect(refus.body.details).toContain('figé');
+      expect(refus.body.details).toContain('3 jour(s) glissant(s)');
+      const ok = await as(REFERENT_IDF).post('/planning', { ...body, date_debut: past(3), date_fin: past(3) });
+      expect(ok.status).toBe(201);
+      expect((await as(REFERENT_IDF).del(`/planning/${ok.body.id_planning}`)).status).toBe(204);
+      // Paramètre vide : règle M-1
+      await setJours('');
+      const m1 = await as(REFERENT_IDF).post('/planning', { ...body, date_debut: past(4), date_fin: past(4) });
+      expect(m1.status).toBe(201);
+      await as(REFERENT_IDF).del(`/planning/${m1.body.id_planning}`);
+    });
+
+    it('plage commencée dans la partie figée : seule la partie modifiable peut changer', async () => {
+      await setJours('3');
+      const [rows] = await app.get(Db).sequelize.query(
+        `INSERT INTO planning (id_user, date_debut, id_creneaux_debut, date_fin, id_creneaux_fin, id_pos_service, created_by, updated_by)
+         VALUES (:id, :d1, 1, :d2, 2, 1, 'test', 'test') RETURNING id_planning`,
+        { replacements: { id: agent.id_user, d1: past(6), d2: future(2) } },
+      );
+      const id = (rows as { id_planning: number }[])[0].id_planning;
+      const put = await as(REFERENT_IDF).put(`/planning/${id}`, { date_debut: past(6), id_creneaux_debut: 1, date_fin: future(2), id_creneaux_fin: 2, id_pos_service: 2 });
+      expect(put.body.code).toBe('RNI-1007');
+      const del = await as(REFERENT_IDF).del(`/planning/${id}`);
+      expect(del.body.code).toBe('RNI-1007');
+      const ins = await as(REFERENT_IDF).post('/planning/insert', { id_planning: id, date_debut: past(4), id_creneaux_debut: 1, date_fin: past(4), id_creneaux_fin: 2, id_pos_service: 2 });
+      expect(ins.body.code).toBe('RNI-1007');
+      // La partie à partir d'aujourd'hui reste modifiable
+      const clear = await as(REFERENT_IDF).post('/planning/clear', { nigend: agent.nigend, date_debut: future(0), id_creneaux_debut: 1, date_fin: future(2), id_creneaux_fin: 2 });
+      expect(clear.body).toEqual({ supprimees: 1, conservees: 1 });
+      const left = await app.get(Db).select<{ date_debut: string; date_fin: string }>(
+        'SELECT date_debut::text, date_fin::text FROM planning WHERE id_user = :id AND date_fin >= :a', { id: agent.id_user, a: past(10) },
+      );
+      expect(left).toEqual([{ date_debut: past(6), date_fin: past(1) }]);
+    });
+
+    it('paramètre exposé au client', async () => {
+      await setJours('3');
+      const r = await as(NEGO_IDF).get('/service/configuration');
+      expect(r.body['rni.planning.jours_glissants']).toBe('3');
     });
   });
 

@@ -4,6 +4,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { Creneau, PlanningDto } from '@rni/shared';
 import { AuthService } from '../../../core/auth/auth.service';
+import { ConfigService } from '../../../core/config/config.service';
 import { ReferentielService } from '../../../core/referentiel/referentiel.service';
 import { ConfirmService } from '../../../shared/ui/confirm';
 import { PlanningFormInit, PlanningSlotDialog } from './planning-slot-dialog';
@@ -20,7 +21,7 @@ describe('PlanningSlotDialog : clic sur une demi-journée d’une plage', () => 
   let el: HTMLElement;
   let ctrl: HttpTestingController;
 
-  async function open(init: PlanningFormInit) {
+  async function open(init: PlanningFormInit, params: Record<string, string> = {}) {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -32,6 +33,7 @@ describe('PlanningSlotDialog : clic sur une demi-journée d’une plage', () => 
         { provide: ReferentielService, useValue: { activePositions: () => positions, libelle: (id: number) => positions.find((p) => p.id_pos_service === id)?.libelle ?? '' } },
       ],
     });
+    TestBed.inject(ConfigService).params.set(params);
     const fixture = TestBed.createComponent(PlanningSlotDialog);
     ref = fixture.componentRef;
     ref.setInput('init', init);
@@ -127,6 +129,42 @@ describe('PlanningSlotDialog : clic sur une demi-journée d’une plage', () => 
     it('création simple (sans sélection) : pas de bouton de suppression', async () => {
       await open({ user: { nigend: '200074', label: 'x' }, date: '2030-12-20', creneau: Creneau.JOUR });
       expect(button('Supprimer la sélection')).toBeUndefined();
+    });
+  });
+  describe('planning figé (jours glissants)', () => {
+    const day = (n: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + n);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const jours = { 'rni.planning.jours_glissants': '3' };
+    const longue: PlanningDto = { ...plage, date_debut: day(-6), date_fin: day(4) };
+
+    it('demi-journée figée : consultation seule, avec le motif', async () => {
+      await open({ planning: longue, slot: { date: day(-5), creneau: Creneau.JOUR } }, jours);
+      expect(el.textContent).toContain('Le planning est figé avant le');
+      expect(el.textContent).toContain('3 jour(s) glissant(s)');
+      expect(el.querySelector('[role=radio]')).toBeNull();
+      expect((el.querySelector('#pf-d1') as HTMLInputElement).disabled).toBe(true);
+      expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.trim() === 'Enregistrer')).toBe(false);
+    });
+
+    it('plage commencée avant la borne : seul « Ce créneau » est proposé', async () => {
+      await open({ planning: longue, slot: { date: day(1), creneau: Creneau.NUIT } }, jours);
+      const modes = Array.from(el.querySelectorAll('[role=radio]')).map((b) => b.textContent!.trim());
+      expect(modes).toHaveLength(1);
+      expect(modes[0]).toContain('Ce créneau');
+      expect(el.textContent).toContain('planning figé');
+      expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent!.trim() === 'Supprimer toute la plage')).toBe(false);
+      expect((el.querySelector('#pf-d1') as HTMLInputElement).min).toBe(day(-3));
+    });
+
+    it('création sur une case figée : refusée ; sans paramètre, règle M-1', async () => {
+      await open({ user: { nigend: '200074', label: 'X' }, date: day(-4), creneau: Creneau.JOUR }, jours);
+      expect(el.textContent).toContain('Le planning est figé avant le');
+      TestBed.resetTestingModule();
+      await open({ user: { nigend: '200074', label: 'X' }, date: day(-4), creneau: Creneau.JOUR });
+      expect(el.textContent).not.toContain('figé');
     });
   });
 });

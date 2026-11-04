@@ -15,12 +15,12 @@ import {
   computeInsertion,
   plageSlots,
   toSlot,
-  minPlanningDate,
   validatePlageBounds,
 } from '@rni/shared';
 import { PlanningApi } from '../../../core/api/planning.api';
 import { UsersApi } from '../../../core/api/users.api';
 import { AuthService } from '../../../core/auth/auth.service';
+import { ConfigService } from '../../../core/config/config.service';
 import { AppError } from '../../../core/errors/app-error';
 import { ToastService } from '../../../core/notifications/toast.service';
 import { ReferentielService } from '../../../core/referentiel/referentiel.service';
@@ -63,6 +63,11 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
       @if (existing() && !readOnlyReason()) {
         <rni-segmented class="mb-4" label="Action" [options]="modes()" [value]="mode()" (valueChange)="setMode($event)" />
       }
+      @if (startsFrozen() && !readOnlyReason()) {
+        <p class="mb-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">
+          Cette plage commence avant le {{ fmt(minDate()) }} (planning figé) : seuls les créneaux à partir de cette date peuvent être modifiés ou supprimés.
+        </p>
+      }
       @if (readOnlyReason(); as reason) {
         <p class="mb-3 rounded-md bg-amber-50 p-2 text-sm text-amber-800">{{ reason }}</p>
       }
@@ -87,7 +92,7 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
           }
         </rni-field>
         <rni-field label="Date de début" for="pf-d1">
-          <input id="pf-d1" type="date" class="input" name="d1" [min]="minDate" [(ngModel)]="dateDebut" [disabled]="!!readOnlyReason()" required />
+          <input id="pf-d1" type="date" class="input" name="d1" [min]="minDate()" [(ngModel)]="dateDebut" [disabled]="!!readOnlyReason()" required />
         </rni-field>
         <rni-field label="Créneau de début" for="pf-c1">
           <select id="pf-c1" class="input" name="c1" [(ngModel)]="creneauDebut" [disabled]="!!readOnlyReason()">
@@ -96,7 +101,7 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
           </select>
         </rni-field>
         <rni-field label="Date de fin" for="pf-d2">
-          <input id="pf-d2" type="date" class="input" name="d2" [min]="dateDebut || minDate" [(ngModel)]="dateFin" [disabled]="!!readOnlyReason()" required />
+          <input id="pf-d2" type="date" class="input" name="d2" [min]="dateDebut || minDate()" [(ngModel)]="dateFin" [disabled]="!!readOnlyReason()" required />
         </rni-field>
         <rni-field label="Créneau de fin" for="pf-c2">
           <select id="pf-c2" class="input" name="c2" [(ngModel)]="creneauFin" [disabled]="!!readOnlyReason()">
@@ -143,13 +148,20 @@ export class PlanningSlotDialog implements OnInit {
   private readonly ref = inject(ReferentielService);
   private readonly toasts = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly config = inject(ConfigService);
 
   readonly init = input<PlanningFormInit>({});
   readonly closed = output<void>();
   readonly saved = output<void>();
 
   protected readonly creneaux = CRENEAU_LIBELLES;
-  protected readonly minDate = minPlanningDate();
+  /** BR-PLA-3 : dates antérieures figées (jours glissants de `t_param_app`, sinon M-1). */
+  protected readonly minDate = computed(() => this.config.planningMinDate());
+  /** Plage existante commençant dans la partie figée : seule la partie modifiable peut changer. */
+  protected readonly startsFrozen = computed(() => {
+    const e = this.existing();
+    return !!e && !!this.config.planningFrozen(e.date_debut);
+  });
   protected readonly geoMin = GEOCODER_PLANNING_MIN_CHARS;
   protected readonly fmt = fmt;
   protected readonly cr = cr;
@@ -165,6 +177,7 @@ export class PlanningSlotDialog implements OnInit {
 
   protected readonly modes = computed<SegmentOption<Mode>[]>(() => {
     const s = this.slot();
+    if (s && this.startsFrozen()) return [{ value: 'insert', label: `Ce créneau (${fmt(s.date).slice(0, 5)} ${cr(s.creneau)})` }];
     return s
       ? [
           { value: 'insert', label: `Ce créneau (${fmt(s.date).slice(0, 5)} ${cr(s.creneau)})` },
@@ -207,7 +220,10 @@ export class PlanningSlotDialog implements OnInit {
     if (e && this.auth.profil() === Profil.NEGOCIATEUR && RESTRICTED_POSITIONS.includes(e.id_pos_service)) {
       return 'Les positions Alerte et Formateur ne peuvent être modifiées que par un référent ou le GIGN.';
     }
-    return null;
+    // Planning figé : demi-journée cliquée (ou début de la plage / de la sélection) avant la borne
+    const i = this.init();
+    const date = i.slot?.date ?? i.range?.date_debut ?? (e ? (this.slot() ? null : e.date_debut) : i.date);
+    return this.config.planningFrozen(date);
   });
 
   protected readonly searchUsers = (q: string) => this.usersApi.search(q);
@@ -311,12 +327,12 @@ export class PlanningSlotDialog implements OnInit {
     if (!this.nigend()) return this.invalid('Sélectionnez un personnel.');
     if (this.position == null) return this.invalid('Choisissez une position de service.');
     const body = this.body();
-    const v = validatePlageBounds(body);
+    const v = validatePlageBounds(body, new Date(), this.config.joursGlissants());
     if (v) return this.invalid(v.message);
     const e = this.existing();
     const insert = this.mode() === 'insert' && !!e;
     if (insert) {
-      const r = computeInsertion(e, body);
+      const r = computeInsertion(e, body, new Date(), this.config.joursGlissants());
       if (!r.ok) return this.invalid(r.violation.message);
     }
     // Création : plannings existants sur la période → confirmation d'écrasement
@@ -362,7 +378,7 @@ export class PlanningSlotDialog implements OnInit {
       date_fin: this.dateFin,
       id_creneaux_fin: Number(this.creneauFin),
     };
-    const v = validatePlageBounds(periode);
+    const v = validatePlageBounds(periode, new Date(), this.config.joursGlissants());
     if (v) return this.invalid(v.message);
     const ov = await this.action.run(() => this.api.overlaps(periode, { silent: true }));
     if (!ov.ok) return;

@@ -23,4 +23,5 @@ INSERT INTO t_param_app (cle_param_app, valeur, description, is_front) VALUES
   ('rni.permanence.gign',                  '+33 6 12 12 12 12',         'Numéro de la permanence GIGN affiché dans l''en-tête', true),
   ('rni.matomo.url',                       '',                          'URL Matomo (vide = désactivé)', true),
   ('rni.matomo.site_id',                   '',                          'Identifiant de site Matomo', true),
-  ('rni.mentions_legales.url',             'mentions-legales.pdf', 'Mentions légales (PDF)', true);
+  ('rni.mentions_legales.url',             'mentions-legales.pdf', 'Mentions légales (PDF)', true),
+  ('rni.planning.jours_glissants',         '30',                        'Planning figé au-delà de N jours passés (fenêtre glissante). Vide = premier jour du mois précédent', true);

@@ -26,6 +26,8 @@ import {
   monthBounds,
   plageSlots,
   toSlot,
+  frozenMessage,
+  minPlanningDate,
   validatePlageBounds,
 } from '@rni/shared';
 import type { Transaction } from 'sequelize';
@@ -36,6 +38,7 @@ import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { Db } from '../../database/db.service.js';
 import { Planning } from '../../database/models/index.js';
+import { ParamService } from '../external/param.service.js';
 import { GEOLOC_CLIENT, type GeolocClient, type GeolocPosition } from '../external/external.types.js';
 import { PlanningRepository, PlanningRow, UserPlanningRow } from './planning.repository.js';
 
@@ -62,7 +65,25 @@ export class PlanningService {
     private readonly adminLog: AdminLogService,
     @InjectModel(Planning) private readonly plannings: typeof Planning,
     @Inject(GEOLOC_CLIENT) private readonly geoloc: GeolocClient,
+    private readonly params: ParamService,
   ) {}
+
+  /** BR-PLA-3 : contrôle des bornes avec la fenêtre glissante paramétrée (`t_param_app`). */
+  private async bounds(p: Partial<PlageBounds>) {
+    return validatePlageBounds(p, new Date(), await this.params.joursGlissants());
+  }
+
+  /** Refus si une plage existante commence dans la partie figée du planning. */
+  private async assertNotFrozen(existing: PlageBounds, action: string): Promise<void> {
+    const jours = await this.params.joursGlissants();
+    const min = minPlanningDate(new Date(), jours);
+    if (existing.date_debut < min) {
+      throw new BusinessException(
+        ErrorCode.INSERTION_INTERDITE,
+        `${frozenMessage(min, jours)} Cette plage ne peut pas être ${action} en entier : modifiez ou supprimez seulement les créneaux à partir du ${min.split('-').reverse().join('/')}.`,
+      );
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Lecture
@@ -311,7 +332,7 @@ export class PlanningService {
 
   async create(current: RniUser, dto: PlanningInputDto): Promise<PlanningDto> {
     const target = await this.target(current, dto.nigend);
-    const v = validatePlageBounds(dto) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service);
+    const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service);
     if (v) throw BusinessException.from(v);
     await this.assertPosition(dto.id_pos_service);
     if (dto.ecraser) return this.createOverwriting(current, target, dto);
@@ -378,7 +399,7 @@ export class PlanningService {
    */
   async clearPeriod(current: RniUser, dto: PlageBounds & { nigend: string }): Promise<{ supprimees: number; conservees: number }> {
     const target = await this.target(current, dto.nigend);
-    const v = validatePlageBounds(dto);
+    const v = await this.bounds(dto);
     if (v) throw BusinessException.from(v);
     const { start, end } = plageSlots(dto);
     return this.db.transaction(async (transaction) => {
@@ -436,7 +457,8 @@ export class PlanningService {
     // §5.2 : le personnel d'une plage n'est pas modifiable
     if (dto.nigend && dto.nigend !== existing.nigend) throw BusinessException.forbidden('Le personnel d’une plage ne peut pas être changé.');
     const target = await this.target(current, existing.nigend);
-    const v = validatePlageBounds(dto) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service, existing.id_pos_service);
+    await this.assertNotFrozen(existing, 'modifiée');
+    const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service, existing.id_pos_service);
     if (v) throw BusinessException.from(v);
     await this.assertPosition(dto.id_pos_service);
     await this.assertNoOverlap(target.id_user, dto, [id]);
@@ -462,6 +484,7 @@ export class PlanningService {
     await this.target(current, existing.nigend);
     const v = checkPositionAllowed(current.id_profil, null, existing.id_pos_service);
     if (v) throw BusinessException.from(v);
+    await this.assertNotFrozen(existing, 'supprimée');
     await this.plannings.destroy({ where: { id_planning: id } });
     this.adminLog.trace('planning.delete', current.nigend, { id_planning: id, nigend: existing.nigend });
   }
@@ -473,6 +496,7 @@ export class PlanningService {
    */
   async insert(current: RniUser, dto: Omit<InsertPlanningDto, 'nigend'> & { nigend?: string }): Promise<PlanningDto[]> {
     if (dto.id_planning == null) throw BusinessException.missing('id_planning');
+    const jours = await this.params.joursGlissants();
     return this.db.transaction(async (transaction) => {
       const outer = await this.repo.findById(dto.id_planning, transaction, true);
       if (!outer) throw BusinessException.notFound('Planning initial introuvable.');
@@ -481,7 +505,7 @@ export class PlanningService {
       const v = checkPositionAllowed(current.id_profil, dto.id_pos_service, outer.id_pos_service);
       if (v) throw BusinessException.from(v);
       await this.assertPosition(dto.id_pos_service);
-      const result = computeInsertion(outer, dto);
+      const result = computeInsertion(outer, dto, new Date(), jours);
       if (!result.ok) throw BusinessException.from(result.violation);
 
       const keep = { adresse_temp: outer.adresse_temp, x_adresse_temp: outer.x_adresse_temp, y_adresse_temp: outer.y_adresse_temp };

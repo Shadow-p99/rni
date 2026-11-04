@@ -124,6 +124,18 @@ authentifié, 403 non autorisé / hors périmètre, 404 introuvable.
 - `dev/90-seed-dev.sql` : **jeu de données fictif** (unités, ~110 personnels RPSI, comptes, plannings
   du mois précédent au mois suivant, fiches d'exemple).
 
+**Planning figé (jours glissants)** : `t_param_app.rni.planning.jours_glissants` (défaut `30`)
+fixe le nombre de jours passés encore modifiables. Les dates antérieures à « aujourd'hui − N
+jours » ne peuvent plus être créées, modifiées ni supprimées (API : RNI-1007) ; dans la grille,
+elles sont hachurées et ouvrent la plage en consultation. Une plage commencée avant la borne ne
+peut être modifiée que créneau par créneau à partir de la borne (« Ce créneau », « Supprimer la
+sélection »). Valeur vide : règle historique (premier jour du mois précédent). Changement pris en
+compte sans redémarrage (cache de 60 s côté API, rechargement de page côté client) :
+
+```sql
+UPDATE t_param_app SET valeur = '15' WHERE cle_param_app = 'rni.planning.jours_glissants';
+```
+
 Le planning repose sur un **index de créneau** (`jours depuis 1970 × 2 + créneau − 1`) calculé en
 colonnes générées `slot_debut` / `slot_fin`. Une **contrainte d'exclusion** PostgreSQL
 (`btree_gist`) garantit en base l'absence de chevauchement (BR-PLA-5).
