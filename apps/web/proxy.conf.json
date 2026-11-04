@@ -1,0 +1,8 @@
+{
+  "/rni/api": {
+    "target": "http://localhost:8096",
+    "secure": false,
+    "changeOrigin": false,
+    "logLevel": "warn"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "rni",
+  "private": true,
+  "version": "2.0.0",
+  "description": "RNI — Répertoire National des Négociateurs (monorepo pnpm : Angular + NestJS)",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "build:shared": "pnpm --filter @rni/shared build",
+    "dev": "pnpm build:shared && pnpm --parallel --filter @rni/shared --filter @rni/api --filter @rni/web dev",
+    "dev:api": "pnpm build:shared && pnpm --filter @rni/api dev",
+    "dev:web": "pnpm build:shared && pnpm --filter @rni/web dev",
+    "test": "pnpm build:shared && pnpm -r --workspace-concurrency=1 test",
+    "test:e2e": "pnpm build:shared && pnpm --filter @rni/api test:e2e",
+    "typecheck": "pnpm build:shared && pnpm -r typecheck",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d db",
+    "release": "pnpm build && rm -rf release && pnpm --filter @rni/api deploy --prod --legacy release/api && cp -r apps/web/dist/web/browser release/web"
+  }
+}

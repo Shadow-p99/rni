@@ -1,0 +1,169 @@
+<div #wrapper class="relative flex-1" style="min-height: calc(100vh - 3.5rem)">
+  <div #map class="absolute inset-0 z-0" role="application" aria-label="Carte opérationnelle des négociateurs"></div>
+
+  <!-- Barre d'outils -->
+  <div class="no-print absolute top-3 left-3 z-[900] flex max-w-[calc(100%-1.5rem)] flex-wrap gap-2" data-html2canvas-ignore>
+    <button type="button" class="btn-secondary shadow" [class.!bg-rni-100]="panel() === 'filtres'" (click)="panel.set(panel() === 'filtres' ? null : 'filtres')">
+      ⚑ Filtres <span class="text-xs text-slate-500">({{ visibleCount() }}/{{ points().length }})</span>
+    </button>
+    <button type="button" class="btn-secondary shadow" [class.!bg-rni-100]="panel() === 'fonds'" (click)="panel.set(panel() === 'fonds' ? null : 'fonds')">🗺 Fonds</button>
+    @if (canCrise()) {
+      <button type="button" class="btn-secondary shadow" [class.!bg-red-50]="panel() === 'crise'" (click)="panel.set(panel() === 'crise' ? null : 'crise')">
+        <span class="text-red-600">⬤</span> Crise
+      </button>
+    }
+    <button type="button" class="btn-secondary shadow" (click)="exportPng()" title="Exporter la carte en PNG">⤓ PNG</button>
+    <button type="button" class="btn-secondary shadow" (click)="refresh()" title="Actualiser">
+      ⟳ <span class="hidden text-xs text-slate-500 sm:inline">{{ lastUpdate() | date: 'HH:mm:ss' }}</span>
+    </button>
+  </div>
+
+  <!-- Panneaux -->
+  @if (panel()) {
+    <div class="no-print card absolute top-16 left-3 z-[900] w-[min(92vw,340px)] p-3 text-sm shadow-lg" data-html2canvas-ignore>
+      @switch (panel()) {
+        @case ('filtres') {
+          <p class="label">Positions de service</p>
+          <label class="flex items-center gap-2 py-1">
+            <input type="checkbox" class="accent-rni-700" [checked]="filters().size === ref.positions().length" (change)="toggleAll()" />
+            <span class="font-medium">Tout</span>
+          </label>
+          @for (p of ref.positions(); track p.id_pos_service) {
+            <label class="flex items-center gap-2 py-1">
+              <input type="checkbox" class="accent-rni-700" [checked]="filters().has(p.id_pos_service)" (change)="toggleFilter(p.id_pos_service)" />
+              <span class="inline-block size-3 rounded-full" [style.background]="p.color"></span>
+              {{ p.libelle }}
+            </label>
+          }
+          <p class="mt-2 text-xs text-slate-500">Les personnels sans planning (gris) sont comptés comme « Indisponible ».</p>
+        }
+        @case ('fonds') {
+          <p class="label">Fond cartographique</p>
+          @for (l of baseLayers(); track l.id) {
+            <label class="flex items-center gap-2 py-1">
+              <input type="radio" name="fond" class="accent-rni-700" [checked]="activeLayer() === l.id" (change)="selectLayer(l.id)" />
+              {{ l.label }}
+            </label>
+          }
+        }
+        @case ('crise') {
+          <p class="label">Localiser une crise</p>
+          <rni-address-autocomplete [minChars]="criseMinChars" placeholder="Adresse de la crise…" [(text)]="criseText" (selected)="onCriseAddress($event)" />
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button type="button" class="btn-secondary" [class.!bg-red-50]="criseMode()" (click)="startClickMode()">⌖ Placer par clic</button>
+            @if (crise()) {
+              <button type="button" class="btn-secondary" (click)="toggleIso()" [disabled]="isoLoading()">
+                {{ isoVisible() ? 'Masquer' : 'Afficher' }} les isochrones
+              </button>
+              <button type="button" class="btn-ghost text-red-700" (click)="clearCrise()">Retirer</button>
+            }
+          </div>
+          @if (crise(); as c) {
+            <p class="mt-2 text-xs text-slate-600">
+              <span class="font-semibold">Crise :</span> {{ c.label }}<br />
+              {{ c.lat.toFixed(5) }}, {{ c.lng.toFixed(5) }}
+              @if (isoLoading()) { — calcul des isochrones… }
+            </p>
+            <p class="mt-1 text-xs text-slate-500">Isochrones d'accessibilité 30 / 60 / 90 min. Point éphémère, non enregistré.</p>
+          }
+        }
+      }
+    </div>
+  }
+
+  @if (criseMode()) {
+    <div class="no-print absolute top-3 left-1/2 z-[950] -translate-x-1/2 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white shadow" data-html2canvas-ignore>
+      Cliquez sur la carte pour placer la crise
+      <button type="button" class="ml-2 underline" (click)="criseMode.set(false)">Annuler</button>
+    </div>
+  }
+
+  <!-- Légende -->
+  <div class="card absolute bottom-14 left-3 z-[800] hidden p-2 text-xs shadow sm:block">
+    @for (p of ref.positions(); track p.id_pos_service) {
+      <div class="flex items-center gap-2 py-0.5"><span class="inline-block size-3 rounded-full" [style.background]="p.color"></span>{{ p.libelle }}</div>
+    }
+    <div class="flex items-center gap-2 py-0.5"><span class="inline-block size-3 rounded-full bg-[#808080]"></span>Sans planning</div>
+    <div class="flex items-center gap-2 py-0.5"><span class="inline-block size-3 rounded-full border border-dashed border-slate-900"></span>Localisé via NEO</div>
+    @if (crise()) {
+      <div class="flex items-center gap-2 py-0.5"><span class="inline-block size-3 rounded-full bg-red-600"></span>Point de crise</div>
+      <div class="flex items-center gap-2 py-0.5"><span class="inline-block h-3 w-5 rounded-sm border border-blue-700 bg-blue-500/20"></span>Isochrones</div>
+    }
+  </div>
+
+  <!-- Fiche informative -->
+  @if (selected(); as p) {
+    <aside class="card absolute top-3 right-3 z-[950] flex max-h-[calc(100%-3rem)] w-[min(92vw,360px)] flex-col overflow-hidden shadow-xl" aria-label="Fiche du personnel">
+      <header class="flex items-start gap-2 border-b border-slate-200 p-3">
+        <div class="flex-1">
+          <p class="font-semibold text-slate-800">{{ p.grade }} {{ p.prenom }} {{ p.nom }}</p>
+          <p class="text-xs text-slate-500">{{ p.code_unite }} — {{ p.libelle_unite }}</p>
+        </div>
+        <button type="button" class="btn-ghost px-2" (click)="closeSelection()" aria-label="Fermer la fiche">✕</button>
+      </header>
+      @if (selection().length > 1) {
+        <div class="flex flex-wrap gap-1 border-b border-slate-200 p-2" role="tablist" aria-label="Personnes au même endroit">
+          @for (s of selection(); track s.id_user; let i = $index) {
+            <button
+              type="button"
+              class="size-7 rounded-full border-2 text-xs font-bold text-white"
+              [style.background]="s.color"
+              [class.border-slate-900]="i === selIndex()"
+              [class.border-white]="i !== selIndex()"
+              [title]="s.prenom + ' ' + s.nom"
+              (click)="selIndex.set(i)"
+            >
+              {{ i + 1 }}
+            </button>
+          }
+        </div>
+      }
+      <dl class="flex-1 space-y-2 overflow-y-auto p-3 text-sm">
+        <div>
+          <dt class="text-xs text-slate-500">Position de service</dt>
+          <dd><span class="chip text-white" [style.background]="p.color">{{ p.id_planning ? p.libelle_pos_service : 'Sans planning' }}</span></dd>
+        </div>
+        <div>
+          <dt class="text-xs text-slate-500">Adresse</dt>
+          <dd>
+            @switch (p.adresse_type) {
+              @case ('localisation') {
+                <span class="font-medium">Localisé via NEO le {{ p.horodatage | date: 'dd/MM/yyyy' }} à {{ p.horodatage | date: 'HH:mm' }}</span>
+              }
+              @case ('temporaire') {
+                <span class="text-xs text-slate-500">(adresse temporaire)</span> {{ p.adresse }}
+              }
+              @default {
+                <span class="text-xs text-slate-500">(unité)</span> {{ p.adresse }}
+              }
+            }
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs text-slate-500">Coordonnées GPS</dt>
+          <dd class="font-mono text-xs">{{ coordsOf(p) }}</dd>
+        </div>
+        @let n = neo(p);
+        @for (t of [
+          { l: 'Téléphone NEO 1', v: n.neo1 },
+          { l: 'Téléphone NEO 2', v: n.neo2 },
+          { l: 'Téléphone personnel', v: p.tel_perso },
+          { l: 'Téléphone unité', v: p.tel_unite }
+        ]; track t.l) {
+          @if (t.v) {
+            <div>
+              <dt class="text-xs text-slate-500">{{ t.l }}</dt>
+              <dd><a class="text-rni-700 underline-offset-2 hover:underline" [href]="'tel:' + tel(t.v)">{{ t.v }}</a></dd>
+            </div>
+          }
+        }
+        @if (p.commentaire) {
+          <div>
+            <dt class="text-xs text-slate-500">Commentaire</dt>
+            <dd class="whitespace-pre-line">{{ p.commentaire }}</dd>
+          </div>
+        }
+      </dl>
+    </aside>
+  }
+</div>

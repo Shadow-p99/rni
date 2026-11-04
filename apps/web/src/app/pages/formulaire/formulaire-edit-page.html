@@ -1,0 +1,111 @@
+<div class="mx-auto flex w-full max-w-5xl flex-col gap-3 p-3 desk:p-4">
+  <div class="card flex flex-wrap items-center gap-2 p-3">
+    <a routerLink="/formulaire" class="btn-ghost px-2">‹ Fiches</a>
+    <h1 class="text-lg font-semibold">
+      {{ isNew() ? 'Nouvelle fiche de crise' : 'Fiche de crise n° ' + fiche()?.id_formulaire }}
+    </h1>
+    @if (fiche(); as f) {
+      @if (f.is_closed) {
+        <span class="chip bg-slate-200 text-slate-700">Clôturée</span>
+      } @else {
+        <span class="chip bg-green-100 text-green-800">Active</span>
+      }
+      <span class="text-xs text-slate-500">Auteur : {{ f.auteur_nom }} — modifiée le {{ f.updated_at | date: 'dd/MM/yyyy HH:mm' }}</span>
+    }
+    <div class="ml-auto flex flex-wrap gap-2">
+      @if (fiche()) {
+        <button type="button" class="btn-secondary" (click)="pdfDialog.set(true)">⤓ PDF</button>
+      }
+      @if (fiche() && isAuthor() && !closed()) {
+        <button type="button" class="btn-secondary text-amber-700" (click)="close()">Clôturer</button>
+      }
+      @if (fiche() && isAuthor()) {
+        <button type="button" class="btn-ghost text-red-700" (click)="remove()">Supprimer</button>
+      }
+      @if (!closed()) {
+        <button type="button" class="btn-primary" (click)="save()" [disabled]="saving()">Enregistrer</button>
+      }
+    </div>
+  </div>
+
+  @if (loading()) {
+    <p class="p-6 text-center text-sm text-slate-500">Chargement…</p>
+  }
+
+  @if (submitted() && form.hasError('name')) {
+    <p class="rounded-md bg-red-50 p-2 text-sm text-red-700">Le nom ou le prénom de l'individu est obligatoire.</p>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="save()" class="flex flex-col gap-3">
+    @for (s of sections; track s.id) {
+      <section class="card">
+        <button type="button" class="flex w-full items-center gap-2 border-b border-slate-200 px-4 py-2.5 text-left font-semibold" (click)="toggle(s.id)" [attr.aria-expanded]="open().has(s.id)">
+          <span class="text-slate-400">{{ open().has(s.id) ? '▾' : '▸' }}</span>{{ s.libelle }}
+        </button>
+        @if (open().has(s.id)) {
+          <div class="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+            @for (f of fields(s.id); track f.key) {
+              <div [class.sm:col-span-2]="f.kind === 'textarea' || f.kind === 'address'">
+                <label class="label" [for]="'f-' + f.key">
+                  {{ f.label }}
+                  @if (f.kind === 'note') {
+                    <span class="font-normal normal-case text-slate-400">({{ noteMin }} à {{ noteMax }})</span>
+                  }
+                </label>
+                @switch (f.kind) {
+                  @case ('textarea') {
+                    <textarea [id]="'f-' + f.key" class="input" rows="2" [formControlName]="f.key" [class.input-error]="invalid(f.key)"></textarea>
+                  }
+                  @case ('select') {
+                    <select [id]="'f-' + f.key" class="input" [formControlName]="f.key">
+                      @for (c of crises; track c) {
+                        <option [value]="c">{{ c }}</option>
+                      }
+                    </select>
+                  }
+                  @case ('note') {
+                    <input [id]="'f-' + f.key" type="number" class="input" [min]="noteMin" [max]="noteMax" step="1" [formControlName]="f.key" [class.input-error]="invalid(f.key)" />
+                  }
+                  @case ('number') {
+                    <input [id]="'f-' + f.key" type="text" inputmode="numeric" class="input" [formControlName]="f.key" [class.input-error]="invalid(f.key)" />
+                  }
+                  @case ('phone') {
+                    <input [id]="'f-' + f.key" type="tel" class="input" placeholder="06 12 34 56 78 / +33 6…" [formControlName]="f.key" [class.input-error]="invalid(f.key)" />
+                    @if (form.get(f.key)?.hasError('phone') && (form.get(f.key)?.touched || submitted())) {
+                      <p class="field-error">Numéro invalide : format national (0X XX XX XX XX) ou international (+XX / 00XX).</p>
+                    }
+                  }
+                  @case ('address') {
+                    <rni-address-autocomplete [minChars]="3" [disabled]="closed()" [invalid]="addressInvalid() || (submitted() && !address().candidate)" [(text)]="addressText" (textChange)="onAddressText($event)" (selected)="onAddress($event)" />
+                    @if (addressInvalid() || (submitted() && !address().candidate)) {
+                      <p class="field-error">Sélectionnez une adresse proposée par le géocodeur.</p>
+                    }
+                  }
+                  @default {
+                    <input [id]="'f-' + f.key" type="text" class="input" [formControlName]="f.key" [class.input-error]="invalid(f.key)" />
+                  }
+                }
+                @if (invalid(f.key) && form.get(f.key)?.hasError('required')) {
+                  <p class="field-error">Champ obligatoire.</p>
+                }
+              </div>
+            }
+          </div>
+        }
+      </section>
+    }
+  </form>
+</div>
+
+<rni-modal [open]="pdfDialog()" title="Exporter la fiche en PDF" size="sm" (closed)="pdfDialog.set(false)">
+  <p class="mb-3 text-sm text-slate-600">Le bloc « Profil de l'individu » est toujours imprimé. Sections complémentaires :</p>
+  @for (s of sections; track s.id) {
+    @if (s.imprimable) {
+      <label class="flex items-center gap-2 py-1 text-sm"><input type="checkbox" class="accent-rni-700" [(ngModel)]="pdfSections[s.id]" />{{ s.libelle }}</label>
+    }
+  }
+  <ng-container footer>
+    <button type="button" class="btn-secondary" (click)="pdfDialog.set(false)">Annuler</button>
+    <button type="button" class="btn-primary" (click)="exportPdf()">Exporter</button>
+  </ng-container>
+</rni-modal>

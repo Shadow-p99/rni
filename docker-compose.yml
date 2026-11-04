@@ -1,0 +1,28 @@
+# PostgreSQL de développement, initialisé avec le schéma, les référentiels et le jeu de données fictif.
+#   pnpm db:up      → démarre la base (port 5432, rni / rni)
+#   pnpm db:reset   → recrée la base depuis les scripts
+services:
+  db:
+    image: postgres:16
+    container_name: rni-db
+    environment:
+      POSTGRES_USER: rni
+      POSTGRES_PASSWORD: rni
+      POSTGRES_DB: rni
+      TZ: Europe/Paris
+    ports:
+      - '5432:5432'
+    volumes:
+      - rni-pgdata:/var/lib/postgresql/data
+      - ./apps/api/db/init/01-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./apps/api/db/init/02-referentiels.sql:/docker-entrypoint-initdb.d/02-referentiels.sql:ro
+      - ./apps/api/db/init/03-param-app.sql:/docker-entrypoint-initdb.d/03-param-app.sql:ro
+      - ./apps/api/db/dev/90-seed-dev.sql:/docker-entrypoint-initdb.d/90-seed-dev.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rni -d rni']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  rni-pgdata:
