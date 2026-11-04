@@ -1,9 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import type { MockUserDto } from '@rni/shared';
 import { firstValueFrom } from 'rxjs';
-import { AuthService } from '../core/auth.service';
-import { ConfigService } from '../core/config.service';
-import { UsersApi } from '../core/data.service';
+import { UsersApi } from '../core/api/users.api';
+import { AuthService } from '../core/auth/auth.service';
+import { ConfigService } from '../core/config/config.service';
 
 const COOKIE = 'rni_mock_nigend';
 
@@ -42,7 +42,7 @@ export class DevSwitcher {
 
   async expand(): Promise<void> {
     this.open.set(true);
-    if (!this.users().length) this.users.set(await firstValueFrom(this.api.mockUsers()));
+    if (!this.users().length) this.users.set(await firstValueFrom(this.api.mockUsers()).catch(() => []));
     this.current ||= this.auth.user()?.nigend ?? '';
   }
 

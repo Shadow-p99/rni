@@ -128,8 +128,71 @@ colonnes générées `slot_debut` / `slot_fin`. Une **contrainte d'exclusion** P
 
 ### Client (`apps/web/src/app`)
 
+```
+core/            services techniques, sans interface
+  api/           un service HTTP par domaine (users, planning, formulaire, geo, service) + options (silent, timeout)
+  auth/          AuthService (identité SSO, droits d'affichage), gardes et résolveur de référentiels
+  errors/        AppError, intercepteur HTTP, ErrorHandler global, ErrorReporter (notifications)
+  state/         AsyncState (chargement / erreur / réessai) et ActionState (enregistrements)
+  referentiel/   positions & couleurs, créneaux, profils, régions (cache)
+  config/        paramètres front de t_param_app, Matomo
+  export/        exports PDF / PNG avec gestion d'échec
+  map/           Leaflet + markercluster, URL de tuiles WMTS / XYZ
+  platform/      garde « modifications non enregistrées »
+shared/ui/       composants réutilisables (présentation uniquement)
+features/<écran>/
+  <écran>-page.ts      orchestration (aucun appel HTTP direct)
+  <écran>.store.ts     état et actions de l'écran (service fourni au niveau de la page)
+  components/          composants de présentation (entrées / sorties)
+layout/          en-tête, compte personnel, sélecteur de profil simulé (dev)
+```
+
+**Composants réutilisables** (`shared/ui`) : `Modal` (pile, Échap sur la plus récente, verrouillage
+pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView` (chargement / erreur +
+« Réessayer » / vide), `ErrorPanel`, `Typeahead` générique (clavier, annulation des requêtes obsolètes,
+états vide / indisponible), `AddressAutocomplete`, `Paginator`, `SearchInput` (différée),
+`SortHeader`, `RegionSelect`, `PositionFilter`, `PositionLegend`, `PositionBadge`, `MonthNav`,
+`Segmented`, `Tabs`, `Toggle`, `Field`, `DefinitionList`, `PageHeader`, `Spinner`.
+
+**Stores par écran** : `GestionStore` (pagination serveur, état dans l'URL), `PlanningStore`,
+`PlanningMobileStore`, `FormulaireEditorStore` (validation, enregistrement, clôture, suppression),
+`CarteStore` (points, filtres, fiche, fonds, crise, isochrones, actualisation périodique).
+
+#### Gestion des erreurs
+
+| Situation | Comportement |
+|---|---|
+| Erreur métier (400, `RNI-xxxx`) | Libellé + détail + code ; **dans le dialogue / formulaire** concerné, sinon en notification |
+| Session SSO expirée / non habilité (401) | Redirection vers `/unauthorized` |
+| Action non autorisée / hors périmètre (403) | Message ; fiche hors périmètre : écran dédié avec retour |
+| API ou base injoignable au démarrage | Page `/indisponible` avec « Réessayer » (et non « accès refusé ») |
+| Serveur injoignable / 502-504 en lecture | 1 nouvel essai automatique, puis zone en erreur avec « Réessayer » |
+| Délai dépassé | 30 s (60 s isochrones, 45 s test de vie) puis erreur « délai dépassé » |
+| Écriture en échec | Jamais réessayée automatiquement ; le dialogue reste ouvert avec l'erreur, la saisie est conservée |
+| Actualisation de la carte en échec | Les points restent affichés ; bandeau « Serveur injoignable » + « Réessayer » |
+| Fond de carte indisponible | Repli automatique sur OpenStreetMap avec avertissement |
+| Services secondaires (compteurs, configuration, fonds) | N'empêchent pas l'affichage de l'écran |
+| Nouvelle version déployée (module introuvable) | Notification persistante « Recharger » |
+| Exception JavaScript / promesse rejetée non prévue | `ErrorHandler` global : notification, journal console, l'application continue |
+| Quitter une fiche modifiée | Confirmation (garde `canDeactivate`) |
+| Export PDF / PNG impossible | Notification explicite |
+| Route inconnue | Page 404 |
+
 | Route | Écran | Accès |
 |---|---|---|
+| `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
+| `/planning` | Calendrier mensuel par région, demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
+| `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
+| `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
+| `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
+| `/testvie` | Monitoring : API, base, Facade, GEOLOC, REMOP | public |
+| `/indisponible`, `/unauthorized`, `**` | Service indisponible (réessai), accès refusé, page introuvable | public |
+
+En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_app`), compte personnel
+(appareil NEO et interrupteurs de géolocalisation), mentions légales (PDF modèle à remplacer dans
+`apps/web/public/mentions-legales.pdf`). Matomo est activé dès que `rni.matomo.url` est renseigné.
+
+---|---|---|
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
 | `/planning` | Calendrier mensuel par région, demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
 | `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |

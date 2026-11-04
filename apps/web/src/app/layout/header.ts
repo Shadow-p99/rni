@@ -1,12 +1,12 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
-import { AuthService } from '../core/auth.service';
-import { ConfigService } from '../core/config.service';
-import { AccountPanel } from './account-panel';
+import { AuthService } from '../core/auth/auth.service';
+import { ConfigService } from '../core/config/config.service';
+import { AccountDialog } from './account/account-dialog';
 
 @Component({
   selector: 'rni-header',
-  imports: [RouterLink, RouterLinkActive, AccountPanel],
+  imports: [RouterLink, RouterLinkActive, AccountDialog],
   template: `
     <header class="no-print sticky top-0 z-[1000] bg-rni-900 text-white shadow">
       <div class="flex h-14 items-center gap-3 px-3 desk:px-5">
@@ -52,7 +52,7 @@ import { AccountPanel } from './account-panel';
       }
     </header>
     @if (account()) {
-      <rni-account-panel (closed)="account.set(false)" />
+      <rni-account-dialog (closed)="account.set(false)" />
     }
   `,
 })
@@ -62,10 +62,9 @@ export class Header {
   protected readonly menu = signal(false);
   protected readonly account = signal(false);
 
-  /** Dette §9.6 : numéro de permanence paramétré dans t_param_app. */
-  protected readonly permanence = computed(() => this.config.param('rni.permanence.gign') ?? this.config.info()?.permanenceGign ?? null);
+  protected readonly permanence = this.config.permanence;
   protected readonly permanenceTel = computed(() => (this.permanence() ?? '').replace(/[^\d+]/g, ''));
-  protected readonly mentionsUrl = computed(() => this.config.param('rni.mentions_legales.url') ?? 'mentions-legales.pdf');
+  protected readonly mentionsUrl = this.config.mentionsUrl;
 
   protected readonly links = computed(() => {
     const out = [

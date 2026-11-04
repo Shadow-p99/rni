@@ -1,12 +1,13 @@
 import { Component, inject } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
-import { ConfigService } from './core/config.service';
-import { initMatomo, trackPage } from './core/matomo';
+import { AuthService } from './core/auth/auth.service';
+import { ConfigService } from './core/config/config.service';
+import { initMatomo, trackPage } from './core/config/matomo';
 import { Header } from './layout/header';
 import { DevSwitcher } from './layout/dev-switcher';
-import { ConfirmHost } from './shared/confirm';
-import { Toasts } from './shared/toasts';
+import { ConfirmHost } from './shared/ui/confirm';
+import { Toasts } from './shared/ui/toasts';
 
 @Component({
   selector: 'rni-root',
@@ -28,6 +29,8 @@ export class App {
 
   constructor() {
     const router = inject(Router);
+    // Identité chargée dès le démarrage (en-tête, y compris sur les pages publiques)
+    void inject(AuthService).load();
     void this.config.load().then(() => initMatomo(this.config.param('rni.matomo.url'), this.config.param('rni.matomo.site_id')));
     router.events.pipe(filter((e) => e instanceof NavigationEnd)).subscribe((e) => trackPage(e.urlAfterRedirects, document.title));
   }
