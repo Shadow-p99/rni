@@ -110,7 +110,7 @@ export class PlanningDesktopView {
     const label = `${u.nigend} — ${u.prenom} ${u.nom}`;
     if (half.planning) {
       const { affiche: _a, ...planning } = half.planning;
-      this.form.set({ planning, user: { nigend: u.nigend, label } });
+      this.form.set({ planning, user: { nigend: u.nigend, label }, slot: { date: half.date, creneau: half.creneau } });
     } else {
       this.form.set({ user: { nigend: u.nigend, label }, date: half.date, creneau: half.creneau });
     }

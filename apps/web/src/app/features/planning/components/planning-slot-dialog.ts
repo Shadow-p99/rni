@@ -13,6 +13,8 @@ import {
   UserDto,
   allowedPositionsFor,
   computeInsertion,
+  plageSlots,
+  toSlot,
   minPlanningDate,
   validatePlageBounds,
 } from '@rni/shared';
@@ -40,6 +42,11 @@ export interface PlanningFormInit {
   creneau?: Creneau;
   /** Période pré-remplie (sélection par glisser). */
   range?: PlageBounds;
+  /**
+   * Demi-journée cliquée dans une plage existante : la fenêtre s'ouvre sur « Ce créneau »
+   * (modification de ce seul créneau, le reste de la plage est conservé).
+   */
+  slot?: { date: string; creneau: Creneau };
 }
 
 type Mode = 'edit' | 'insert';
@@ -54,14 +61,20 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
   template: `
     <rni-modal [open]="true" [title]="existing() ? 'Plage de planning' : 'Nouveau créneau de planning'" [locked]="action.busy()" (closed)="closed.emit()">
       @if (existing() && !readOnlyReason()) {
-        <rni-segmented class="mb-4" label="Action" [options]="modes" [value]="mode()" (valueChange)="setMode($event)" />
+        <rni-segmented class="mb-4" label="Action" [options]="modes()" [value]="mode()" (valueChange)="setMode($event)" />
       }
       @if (readOnlyReason(); as reason) {
         <p class="mb-3 rounded-md bg-amber-50 p-2 text-sm text-amber-800">{{ reason }}</p>
       }
       @if (mode() === 'insert' && existing(); as e) {
         <p class="mb-3 rounded-md bg-rni-100 p-2 text-xs text-rni-900">
-          La période insérée doit être incluse dans la plage initiale ({{ fmt(e.date_debut) }} {{ cr(e.id_creneaux_debut) }} → {{ fmt(e.date_fin) }} {{ cr(e.id_creneaux_fin) }}) ; la plage sera découpée automatiquement.
+          @if (slot(); as s) {
+            Seul le créneau du {{ fmt(s.date) }} ({{ cr(s.creneau) }}) sera modifié ; le reste de la plage
+            ({{ fmt(e.date_debut) }} {{ cr(e.id_creneaux_debut) }} → {{ fmt(e.date_fin) }} {{ cr(e.id_creneaux_fin) }}) est conservé.
+            Vous pouvez étendre la période dans les limites de la plage.
+          } @else {
+            La période insérée doit être incluse dans la plage initiale ({{ fmt(e.date_debut) }} {{ cr(e.id_creneaux_debut) }} → {{ fmt(e.date_fin) }} {{ cr(e.id_creneaux_fin) }}) ; la plage sera découpée automatiquement.
+          }
         </p>
       }
 
@@ -112,7 +125,7 @@ const cr = (c: number) => (c === Creneau.JOUR ? 'Jour' : 'Nuit');
         <button type="button" class="btn-secondary" (click)="closed.emit()" [disabled]="action.busy()">Annuler</button>
         @if (!readOnlyReason()) {
           <button type="submit" form="planning-slot-form" class="btn-primary" [disabled]="action.busy()">
-            {{ action.busy() ? 'Enregistrement…' : mode() === 'insert' ? 'Insérer' : 'Enregistrer' }}
+            {{ action.busy() ? 'Enregistrement…' : mode() === 'insert' && !slot() ? 'Insérer' : 'Enregistrer' }}
           </button>
         }
       </ng-container>
@@ -136,10 +149,28 @@ export class PlanningSlotDialog implements OnInit {
   protected readonly geoMin = GEOCODER_PLANNING_MIN_CHARS;
   protected readonly fmt = fmt;
   protected readonly cr = cr;
-  protected readonly modes: SegmentOption<Mode>[] = [
-    { value: 'edit', label: 'Modifier la plage' },
-    { value: 'insert', label: 'Insérer une période' },
-  ];
+  /** Demi-journée cliquée, si elle fait partie d'une plage de plusieurs créneaux. */
+  protected readonly slot = computed(() => {
+    const e = this.existing();
+    const s = this.init().slot;
+    if (!e || !s) return null;
+    const { start, end } = plageSlots(e);
+    const k = toSlot(s.date, s.creneau);
+    return start !== end && k >= start && k <= end ? s : null;
+  });
+
+  protected readonly modes = computed<SegmentOption<Mode>[]>(() => {
+    const s = this.slot();
+    return s
+      ? [
+          { value: 'insert', label: `Ce créneau (${fmt(s.date).slice(0, 5)} ${cr(s.creneau)})` },
+          { value: 'edit', label: 'Toute la plage' },
+        ]
+      : [
+          { value: 'edit', label: 'Modifier la plage' },
+          { value: 'insert', label: 'Insérer une période' },
+        ];
+  });
 
   protected readonly action = new ActionState();
   protected readonly validation = signal<AppError | null>(null);
@@ -186,6 +217,8 @@ export class PlanningSlotDialog implements OnInit {
       this.nigend.set(e.nigend);
       this.userLabel.set(i.user?.label ?? e.nigend);
       this.fill(e);
+      // Clic sur une demi-journée d'une plage de plusieurs créneaux : modification de ce créneau seul
+      if (this.slot() && !this.readOnlyReason()) this.setMode('insert');
       return;
     }
     if (i.user) {
@@ -231,6 +264,11 @@ export class PlanningSlotDialog implements OnInit {
     this.action.clear();
     const e = this.existing()!;
     if (m === 'insert') {
+      const s = this.slot();
+      if (s) {
+        this.dateDebut = this.dateFin = s.date;
+        this.creneauDebut = this.creneauFin = s.creneau;
+      }
       this.position = null;
       this.adresse = '';
       this.candidate.set(null);
@@ -299,8 +337,8 @@ export class PlanningSlotDialog implements OnInit {
     );
     if (!r.ok) return;
     this.toasts.success(
-      insert ? 'Période insérée' : e ? 'Plage modifiée' : ecraser ? 'Créneau enregistré, plannings existants écrasés' : 'Créneau enregistré',
-      insert ? 'La plage initiale a été découpée.' : undefined,
+      insert ? (this.slot() ? 'Créneau modifié' : 'Période insérée') : e ? 'Plage modifiée' : ecraser ? 'Créneau enregistré, plannings existants écrasés' : 'Créneau enregistré',
+      insert ? 'Le reste de la plage est conservé.' : undefined,
     );
     this.saved.emit();
   }

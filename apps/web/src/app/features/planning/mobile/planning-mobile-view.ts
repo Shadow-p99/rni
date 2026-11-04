@@ -68,7 +68,12 @@ export class PlanningMobileView {
   }
 
   open(p: PlanningDetailDto): void {
-    this.form.set({ planning: p, user: { nigend: p.nigend, label: `${p.nigend} — ${p.prenom} ${p.nom}` } });
+    // Créneau affiché (jour sélectionné, Jour / Nuit) : modification de ce seul créneau par défaut
+    this.form.set({
+      planning: p,
+      user: { nigend: p.nigend, label: `${p.nigend} — ${p.prenom} ${p.nom}` },
+      slot: { date: this.store.selectedDate(), creneau: this.store.creneau() },
+    });
   }
 
   onSaved(): void {
