@@ -9,6 +9,7 @@ import type {
   PlanningInputDto,
   RegionCountsDto,
   TimetableDto,
+  TimetableFilter,
 } from '@rni/shared';
 import { API, RequestOptions, ctx, toParams } from './api.config';
 
@@ -16,8 +17,12 @@ import { API, RequestOptions, ctx, toParams } from './api.config';
 export class PlanningApi {
   private readonly http = inject(HttpClient);
 
-  timetable(month: string, region?: number | null, opts?: RequestOptions) {
-    return this.http.get<TimetableDto>(`${API}/planning/timetable`, { params: toParams({ month, region }), ...ctx(opts) });
+  /** Calendrier du mois ; `filter` = recherche serveur dans tout le périmètre. */
+  timetable(month: string, region?: number | null, opts?: RequestOptions, filter: TimetableFilter = {}) {
+    return this.http.get<TimetableDto>(`${API}/planning/timetable`, {
+      params: toParams({ month, region, q: filter.q, positions: filter.positions?.length ? filter.positions.join(',') : undefined }),
+      ...ctx(opts),
+    });
   }
   geojson(opts?: RequestOptions) {
     return this.http.get<PersonnelCollection>(`${API}/planning/geojson`, ctx(opts));

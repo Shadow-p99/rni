@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CalendarDay } from '../planning-mobile.store';
+import { CalendarDay } from './planning-mobile.store';
 
 /** Calendrier mensuel compact avec compteurs par position. */
 @Component({

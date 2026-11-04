@@ -2,9 +2,9 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, TestRequest, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import type { RegionCountsDto, TimetableDto } from '@rni/shared';
-import { AuthService } from '../../core/auth/auth.service';
-import { ReferentielService } from '../../core/referentiel/referentiel.service';
-import { PlanningStore } from './planning.store';
+import { AuthService } from '../../../core/auth/auth.service';
+import { ReferentielService } from '../../../core/referentiel/referentiel.service';
+import { PlanningDesktopStore as PlanningStore } from './planning-desktop.store';
 
 const REGIONS = [
   { id_region: 84, libelle: 'Auvergne-Rhône-Alpes', center: null },
@@ -107,5 +107,66 @@ describe('PlanningStore : chargement par région', () => {
     void store.loadRegion(11);
     flushTt(timetableReqs());
     await vi.waitFor(() => expect(store.regions()[0]).toMatchObject({ loaded: true, error: null }));
+  });
+
+  describe('recherche serveur', () => {
+    const init = () => {
+      store.init();
+      ctrl.expectOne('/rni/api/region/getNbPositionServiceByRegion').flush(counts);
+      flushTt(timetableReqs());
+    };
+
+    it('moins de 2 caractères : aucun appel', () => {
+      init();
+      store.setSearch('a');
+      ctrl.expectNone((r) => r.url === '/rni/api/planning/timetable');
+      expect(store.filterActive()).toBe(false);
+    });
+
+    it('recherche dans tout le périmètre : seules les régions avec résultats, dépliées', async () => {
+      init();
+      store.setSearch('dupont');
+      const req = ctrl.expectOne((r) => r.url === '/rni/api/planning/timetable');
+      expect(req.request.params.get('q')).toBe('dupont');
+      expect(req.request.params.has('region')).toBe(false);
+      req.flush({ ...timetable(24, store.month()), filter: { matches: 1, truncated: false } });
+      await vi.waitFor(() => expect(store.regions()).toHaveLength(1));
+      expect(store.regions()[0]).toMatchObject({ id_region: 24, expanded: true, matches: 1, total: 4 });
+      expect(store.regions()[0].rows).toHaveLength(1);
+      expect(store.filterSummary()).toEqual({ matches: 1, truncated: false });
+
+      // Repli visuel sans nouvel appel
+      store.toggleRegion(24);
+      expect(store.regions()[0].expanded).toBe(false);
+      ctrl.expectNone((r) => r.url === '/rni/api/planning/timetable');
+    });
+
+    it('filtre « Maintenant » envoyé à l’API (0 = sans planning)', () => {
+      init();
+      store.setPositions(new Set([1, 0]));
+      const req = ctrl.expectOne((r) => r.url === '/rni/api/planning/timetable');
+      expect(req.request.params.get('positions')).toBe('1,0');
+      expect(req.request.params.has('q')).toBe(false);
+    });
+
+    it('effacer les filtres : retour à l’affichage normal sans recharger la région déjà chargée', async () => {
+      init();
+      store.setSearch('dupont');
+      ctrl.expectOne((r) => r.url === '/rni/api/planning/timetable').flush({ ...timetable(24, store.month()), filter: { matches: 1, truncated: false } });
+      store.clearFilters();
+      ctrl.expectNone((r) => r.url === '/rni/api/planning/timetable');
+      expect(store.regions().map((r) => r.id_region)).toEqual([11, 84, 24]);
+      await vi.waitFor(() => expect(store.regions()[0]).toMatchObject({ expanded: true, loaded: true }));
+    });
+
+    it('changement de mois en mode filtré : nouvelle recherche pour le mois', () => {
+      init();
+      store.setSearch('dupont');
+      ctrl.expectOne((r) => r.url === '/rni/api/planning/timetable').flush({ ...timetable(24, store.month()), filter: { matches: 1, truncated: false } });
+      store.setMonth('2030-02');
+      const req = ctrl.expectOne((r) => r.url === '/rni/api/planning/timetable');
+      expect(req.request.params.get('month')).toBe('2030-02');
+      expect(req.request.params.get('q')).toBe('dupont');
+    });
   });
 });

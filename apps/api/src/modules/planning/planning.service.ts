@@ -14,6 +14,8 @@ import {
   PosService,
   Profil,
   TimetableDto,
+  TimetableFilter,
+  MAX_PLANNING_MATCHES,
   TimetableRegionDto,
   checkPositionAllowed,
   clipPlage,
@@ -26,6 +28,7 @@ import {
   validatePlageBounds,
 } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
+import { searchTerms } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
@@ -35,6 +38,9 @@ import { GEOLOC_CLIENT, type GeolocClient, type GeolocPosition } from '../extern
 import { PlanningRepository, PlanningRow, UserPlanningRow } from './planning.repository.js';
 
 export type PlanningUpdateInput = Omit<PlanningInputDto, 'nigend'> & { nigend?: string };
+
+/** Valeur de filtre « sans planning » (aucune plage au créneau courant). */
+const SANS_PLANNING = 0;
 
 interface PosRow {
   id_pos_service: number;
@@ -65,8 +71,13 @@ export class PlanningService {
     return new Map(rows.map((r) => [r.id_pos_service, r]));
   }
 
-  /** Calendrier mensuel par région (§5.1, BR-PLA-2). */
-  async timetable(user: RniUser, month: string, region?: number): Promise<TimetableDto> {
+  /**
+   * Calendrier mensuel par région (§5.1, BR-PLA-2).
+   * Avec `filter` (recherche / position au créneau courant), la recherche porte sur **tout le
+   * périmètre** : seuls les agents correspondants et leurs régions sont renvoyés (au plus
+   * MAX_PLANNING_MATCHES agents).
+   */
+  async timetable(user: RniUser, month: string, region?: number, filter: TimetableFilter = {}): Promise<TimetableDto> {
     let bounds: { first: string; last: string };
     try {
       bounds = monthBounds(month);
@@ -76,9 +87,20 @@ export class PlanningService {
     const regions = this.perimetre.restrict(user, region);
     const start = toSlot(bounds.first, 1);
     const end = toSlot(bounds.last, 2);
-    const [users, plannings, regionRows] = await Promise.all([
-      this.repo.planningUsers(regions),
-      this.repo.planningsBetween(start, end, regions),
+    const terms = searchTerms(filter.q);
+    const positions = filter.positions?.length ? new Set(filter.positions) : null;
+    const filtered = terms.length > 0 || positions != null;
+
+    let users = await this.repo.planningUsers(regions, { terms });
+    if (positions) {
+      const current = await this.currentPlannings(users, regions);
+      users = users.filter((u) => positions.has(current.get(u.id_user)?.id_pos_service ?? SANS_PLANNING));
+    }
+    const matches = users.length;
+    if (filtered) users = users.slice(0, MAX_PLANNING_MATCHES);
+
+    const [plannings, regionRows] = await Promise.all([
+      this.repo.planningsBetween(start, end, regions, filtered ? { id_users: users.map((u) => u.id_user) } : {}),
       this.db.select<{ id_region: number; libelle: string }>(
         `SELECT id_region, libelle FROM ref_regions ${regions ? 'WHERE id_region IN (:regions)' : ''} ORDER BY libelle`,
         { regions },
@@ -107,7 +129,26 @@ export class PlanningService {
         plannings: (byUser.get(u.id_user) ?? []).map((p) => ({ ...strip(p), affiche: clipPlage(p, start, end)! })),
       });
     }
-    return { month, ...bounds, regions: [...byRegion.values()] };
+    const out = [...byRegion.values()];
+    return filtered
+      ? { month, ...bounds, regions: out.filter((r) => r.users.length), filter: { matches, truncated: matches > users.length } }
+      : { month, ...bounds, regions: out };
+  }
+
+  /** Plage en cours de chaque agent, le créneau courant étant calculé dans le fuseau de son département. */
+  private async currentPlannings(users: UserPlanningRow[], regions: number[] | null, now = new Date()): Promise<Map<number, PlanningRow>> {
+    const out = new Map<number, PlanningRow>();
+    if (!users.length) return out;
+    const slots = new Map<string, number>();
+    for (const u of users) if (!slots.has(u.time_zone)) slots.set(u.time_zone, currentSlot(now, u.time_zone));
+    const values = [...slots.values()];
+    const plannings = await this.repo.planningsBetween(Math.min(...values), Math.max(...values), regions);
+    const byUser = new Map(users.map((u) => [u.id_user, slots.get(u.time_zone)!]));
+    for (const p of plannings) {
+      const cur = byUser.get(p.id_user);
+      if (cur != null && p.slot_debut <= cur && p.slot_fin >= cur) out.set(p.id_user, p);
+    }
+    return out;
   }
 
   /** §5.5 : plannings couvrant une date (Jour ou Nuit), bornés aux profils 3/4/7. */

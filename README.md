@@ -99,7 +99,7 @@ Principaux points d'entrée (préfixe `/rni/api`) :
 ```
 GET  /users/isUser  /users/isAdmin  /users/me  /users?region=  /users/search?q=  /users/rpsi?q=
 POST /users          PUT /users/:id   DELETE /users/:id   PUT /users/infoDeviceUser   PUT /users/activateLocation
-GET  /planning/timetable?month=AAAA-MM&region=   /planning/geojson   /planning/:id
+GET  /planning/timetable?month=AAAA-MM&region=&q=&positions=1,4,0   /planning/geojson   /planning/:id
 GET  /planning/byDateAndIdRegion/:date  /planning/byNigendAndDate/:nigend/:date  /planning/byPositionAndDate/:id/:date
 POST /planning   PUT /planning/:id   DELETE /planning/:id   POST /planning/insert
 GET  /region  /region/all  /region/getNbPositionServiceByRegion  /region/getNbPositionServiceAllRegionMobile?from=&to=
@@ -154,7 +154,7 @@ pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView`
 `SortHeader`, `RegionSelect`, `PositionFilter`, `PositionLegend`, `PositionBadge`, `MonthNav`,
 `Segmented`, `Tabs`, `Toggle`, `Field`, `DefinitionList`, `PageHeader`, `Spinner`.
 
-**Stores par écran** : `GestionStore` (pagination serveur, état dans l'URL), `PlanningStore`,
+**Stores par écran** : `GestionStore` (pagination serveur, état dans l'URL), `PlanningDesktopStore`,
 `PlanningMobileStore`, `FormulaireEditorStore` (validation, enregistrement, clôture, suppression),
 `CarteStore` (points, filtres, fiche, fonds, crise, isochrones, actualisation périodique).
 
@@ -181,24 +181,11 @@ pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView`
 | Route | Écran | Accès |
 |---|---|---|
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
-| `/planning` | Calendrier mensuel par région (**chargement à la demande** : seule la région de l'utilisateur est chargée à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
-| `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
+| `/planning` | **Une seule page, deux interfaces** selon la largeur d'écran (bascule en direct à 1038 px). Bureau : calendrier mensuel par région (chargement à la demande : la région de l'utilisateur à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), **recherche et filtre « Maintenant » exécutés par l'API dans tout le périmètre**, demi-cases Jour / Nuit, saisie / modification / insertion / suppression, export PDF A4 paysage. Mobile : calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide. `/planning-mobile` redirige vers `/planning` | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
 | `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
 | `/testvie` | Monitoring : API, base, Facade, GEOLOC, REMOP | public |
 | `/indisponible`, `/unauthorized`, `**` | Service indisponible (réessai), accès refusé, page introuvable | public |
-
-En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_app`), compte personnel
-(appareil NEO et interrupteurs de géolocalisation), mentions légales (PDF modèle à remplacer dans
-`apps/web/public/mentions-legales.pdf`). Matomo est activé dès que `rni.matomo.url` est renseigné.
-
----|---|---|
-| `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
-| `/planning` | Calendrier mensuel par région (**chargement à la demande** : seule la région de l'utilisateur est chargée à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
-| `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
-| `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
-| `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
-| `/testvie` | Monitoring : API, base, Facade, GEOLOC, REMOP | public |
 
 En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_app`), compte personnel
 (appareil NEO et interrupteurs de géolocalisation), mentions légales (PDF modèle à remplacer dans

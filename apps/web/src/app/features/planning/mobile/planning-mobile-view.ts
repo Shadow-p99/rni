@@ -1,20 +1,20 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { Creneau, PlanningDetailDto } from '@rni/shared';
-import { AuthService } from '../../core/auth/auth.service';
-import { AsyncView } from '../../shared/ui/async-view';
-import { MonthNav } from '../../shared/ui/month-nav';
-import { PositionFilter } from '../../shared/ui/position-filter';
-import { RegionSelect } from '../../shared/ui/region-select';
-import { Segmented, SegmentOption } from '../../shared/ui/segmented';
-import { PlanningFormInit, PlanningSlotDialog } from '../planning/components/planning-slot-dialog';
-import { DayList } from './components/day-list';
-import { MonthCalendar } from './components/month-calendar';
+import { AuthService } from '../../../core/auth/auth.service';
+import { AsyncView } from '../../../shared/ui/async-view';
+import { MonthNav } from '../../../shared/ui/month-nav';
+import { PositionFilter } from '../../../shared/ui/position-filter';
+import { RegionSelect } from '../../../shared/ui/region-select';
+import { Segmented, SegmentOption } from '../../../shared/ui/segmented';
+import { PlanningFormInit, PlanningSlotDialog } from '../components/planning-slot-dialog';
+import { DayList } from './day-list';
+import { MonthCalendar } from './month-calendar';
 import { PlanningMobileStore } from './planning-mobile.store';
 
-/** Planning mobile (§5.4). */
+/** Planning — interface mobile (§5.4). */
 @Component({
-  selector: 'rni-planning-mobile-page',
+  selector: 'rni-planning-mobile-view',
   imports: [DatePipe, MonthNav, RegionSelect, Segmented, PositionFilter, AsyncView, MonthCalendar, DayList, PlanningSlotDialog],
   providers: [PlanningMobileStore],
   template: `
@@ -51,7 +51,7 @@ import { PlanningMobileStore } from './planning-mobile.store';
     }
   `,
 })
-export class PlanningMobilePage {
+export class PlanningMobileView {
   protected readonly auth = inject(AuthService);
   protected readonly store = inject(PlanningMobileStore);
   protected readonly form = signal<PlanningFormInit | null>(null);

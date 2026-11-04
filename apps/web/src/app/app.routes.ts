@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { desktopPlanningGuard, formulaireGuard, isAdminGuard, isUserGuard, referentielResolver } from './core/auth/auth.guards';
+import { formulaireGuard, isAdminGuard, isUserGuard, referentielResolver } from './core/auth/auth.guards';
 import { unsavedChangesGuard } from './core/platform/unsaved-changes.guard';
 
 export const routes: Routes = [
@@ -17,16 +17,13 @@ export const routes: Routes = [
         loadComponent: () => import('./features/carte/carte-page').then((m) => m.CartePage),
       },
       {
+        // Une seule page : interface bureau ou mobile selon la largeur d'écran
         path: 'planning',
-        title: 'Planning national — RNI',
-        canActivate: [desktopPlanningGuard],
+        title: 'Planning — RNI',
         loadComponent: () => import('./features/planning/planning-page').then((m) => m.PlanningPage),
       },
-      {
-        path: 'planning-mobile',
-        title: 'Planning — RNI',
-        loadComponent: () => import('./features/planning-mobile/planning-mobile-page').then((m) => m.PlanningMobilePage),
-      },
+      // Ancienne adresse de la version mobile (favoris, liens partagés)
+      { path: 'planning-mobile', redirectTo: 'planning' },
       {
         path: 'formulaire',
         title: 'Fiches de crise — RNI',

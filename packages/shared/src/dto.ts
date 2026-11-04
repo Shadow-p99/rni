@@ -168,7 +168,25 @@ export interface TimetableDto {
   first: string;
   last: string;
   regions: TimetableRegionDto[];
+  /**
+   * Présent lorsque la requête est filtrée (`q` / `positions`) : seules les régions ayant des
+   * résultats sont renvoyées, avec les seuls agents correspondants.
+   */
+  filter?: { matches: number; truncated: boolean };
 }
+
+/** Filtres serveur du calendrier (recherche dans tout le périmètre). */
+export interface TimetableFilter {
+  /** Nom, prénom, nigend, code ou libellé d'unité (plusieurs mots possibles). */
+  q?: string;
+  /** Positions au créneau courant (0 = sans planning). */
+  positions?: number[];
+}
+
+/** Nombre minimal de caractères pour la recherche du planning. */
+export const PLANNING_SEARCH_MIN_CHARS = 2;
+/** Nombre maximal d'agents renvoyés par une recherche du planning (au-delà : affiner). */
+export const MAX_PLANNING_MATCHES = 300;
 
 /** Planning enrichi de l'identité de l'agent (endpoints de restitution par date). */
 export interface PlanningDetailDto extends PlanningDto {

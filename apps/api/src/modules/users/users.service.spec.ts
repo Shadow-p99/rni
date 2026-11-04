@@ -1,4 +1,5 @@
-import { orderBy, searchTerms } from './users.service.js';
+import { searchTerms } from '../../common/sql-search.js';
+import { orderBy } from './users.service.js';
 
 describe('liste du personnel : utilitaires SQL', () => {
   it('découpe la recherche et échappe les jokers', () => {

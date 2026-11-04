@@ -23,6 +23,7 @@ import {
   type UserSort,
 } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
+import { searchTerms, termParams, userSearchClauses, wordsClause } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { Db } from '../../database/db.service.js';
@@ -102,15 +103,9 @@ export class UsersService {
     const where = ['NOT s.bool_user_inactif', 's.id_profil IN (:profils)'];
     const params: Record<string, unknown> = { profils, region, limit: size, offset, cap: MAX_COUNTED_ROWS + 1 };
     if (region != null) where.push('s.id_region = :region');
-    searchTerms(query.q).forEach((term, i) => {
-      // Chaque mot doit apparaître (nom, prénom, nigend, code ou libellé d'unité).
-      // `= ANY(ARRAY(...))` permet un BitmapOr entre ix_ref_user_search (trigrammes) et ix_ref_user_unite.
-      where.push(
-        `((s.nigend || ' ' || s.nom || ' ' || s.prenom || ' ' || coalesce(s.code_unite, '')) ILIKE :t${i}
-          OR s.code_unite = ANY (ARRAY(SELECT code_unite FROM ref_unite WHERE libelle ILIKE :t${i})))`,
-      );
-      params[`t${i}`] = term;
-    });
+    const terms = searchTerms(query.q);
+    where.push(...userSearchClauses('s', terms.length));
+    Object.assign(params, termParams(terms));
     const clause = where.join(' AND ');
     const order = orderBy(query.sort, query.dir);
 
@@ -309,25 +304,6 @@ function pickGeoloc(u: RefUser) {
     geoloc_bool_geoloc: u.geoloc_bool_geoloc,
     geoloc_bool_indispo: u.geoloc_bool_indispo,
   };
-}
-
-/** Découpe la recherche en mots (5 max), échappe les jokers SQL et encadre de `%`. */
-export function searchTerms(q?: string | null): string[] {
-  return (q ?? '')
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 0)
-    .slice(0, 5)
-    .map((w) => `%${w.slice(0, 64).replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-}
-
-/** `AND expr ILIKE :t0 AND expr ILIKE :t1 …` (expression couverte par un index trigrammes). */
-function wordsClause(expr: string, n: number): string {
-  return Array.from({ length: n }, (_, i) => `AND (${expr}) ILIKE :t${i}`).join(' ');
-}
-
-function termParams(terms: string[]): Record<string, string> {
-  return Object.fromEntries(terms.map((t, i) => [`t${i}`, t]));
 }
 
 /** Table de tri étroite : uniquement les colonnes utiles au filtre et au tri (pas de jointures larges). */

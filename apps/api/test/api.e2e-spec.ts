@@ -139,6 +139,43 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_IDF).del(`/planning/${id}`)).status).toBe(204);
       expect((await as(GIGN).get(`/planning/${id}`)).status).toBe(404);
     });
+    it('recherche serveur dans tout le périmètre : seuls les agents et régions correspondants', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      // Agent d'une région voisine, recherché depuis l'Île-de-France
+      const target = (await as(GIGN).get('/users?region=44&profil=4&size=1')).body.items[0] as { nom: string; prenom: string; nigend: string };
+      const r = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
+      expect(r.status).toBe(200);
+      expect(r.body.filter).toEqual({ matches: 1, truncated: false });
+      expect(r.body.regions).toHaveLength(1);
+      expect(r.body.regions[0].id_region).toBe(44);
+      expect(r.body.regions[0].users.map((u: { nigend: string }) => u.nigend)).toEqual([target.nigend]);
+      // Plusieurs mots, dans le désordre
+      const byName = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.prenom + ' ' + target.nom)}`);
+      expect(byName.body.regions.flatMap((x: { users: { nigend: string }[] }) => x.users.map((u) => u.nigend))).toContain(target.nigend);
+      // Hors périmètre (OMS : sa région seule)
+      const oms = await as(OMS).get(`/planning/timetable?month=${month}&q=${encodeURIComponent(target.nigend)}`);
+      expect(oms.body.regions).toEqual([]);
+      expect(oms.body.filter.matches).toBe(0);
+    });
+    it('filtre par position au créneau courant (0 = sans planning)', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      const counts = (await as(GIGN).get('/region/getNbPositionServiceByRegion')).body as { counts: Record<string, number>; sans_planning: number }[];
+      const dispo = counts.reduce((s, c) => s + (c.counts['1'] ?? 0), 0);
+      const sans = counts.reduce((s, c) => s + c.sans_planning, 0);
+      const r = await as(GIGN).get(`/planning/timetable?month=${month}&positions=1`);
+      expect(r.body.filter.matches).toBe(dispo);
+      const r0 = await as(GIGN).get(`/planning/timetable?month=${month}&positions=0`);
+      expect(r0.body.filter.matches).toBe(sans);
+      const both = await as(GIGN).get(`/planning/timetable?month=${month}&positions=1,0`);
+      expect(both.body.filter.matches).toBe(dispo + sans);
+      expect((await as(GIGN).get(`/planning/timetable?month=${month}&positions=x`)).body.code).toBe('RNI-1002');
+    });
+    it('sans filtre : toutes les régions visibles, pas de bloc filter', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      const r = await as(REFERENT_IDF).get(`/planning/timetable?month=${month}`);
+      expect(r.body.filter).toBeUndefined();
+      expect(r.body.regions.length).toBe(6);
+    });
     it('calendrier mensuel tronqué aux bornes du mois (BR-PLA-2)', async () => {
       const month = new Date().toISOString().slice(0, 7);
       const r = await as(GIGN).get(`/planning/timetable?month=${month}&region=11`);

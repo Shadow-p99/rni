@@ -2,7 +2,7 @@ import { Component, inject, input, output } from '@angular/core';
 import { ReferentielService } from '../../../core/referentiel/referentiel.service';
 import { AsyncView } from '../../../shared/ui/async-view';
 import { Spinner } from '../../../shared/ui/spinner';
-import { RegionView } from '../planning.store';
+import { RegionView } from './planning-desktop.store';
 import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
 
 /**
@@ -19,8 +19,8 @@ import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
       <span class="text-slate-400" aria-hidden="true">{{ r.expanded ? '▾' : '▸' }}</span>
       <span class="font-semibold">{{ r.libelle }}</span>
       <span class="text-xs text-slate-500">
-        @if (r.expanded && r.loaded && filtered()) {
-          {{ r.rows.length }} / {{ r.total ?? '?' }} personnel(s)
+        @if (r.matches != null) {
+          {{ r.matches }} résultat(s){{ r.total != null ? ' sur ' + r.total + ' personnel(s)' : '' }}
         } @else if (r.total != null) {
           {{ r.total }} personnel(s)
         }
@@ -52,8 +52,6 @@ export class RegionSection {
   protected readonly ref = inject(ReferentielService);
   readonly region = input.required<RegionView>();
   readonly days = input.required<DayHeader[]>();
-  /** Un filtre (recherche / position) est actif : affiche « affichés / total ». */
-  readonly filtered = input(false);
   readonly toggle = output<void>();
   readonly retry = output<void>();
   readonly cellClick = output<CellClick>();

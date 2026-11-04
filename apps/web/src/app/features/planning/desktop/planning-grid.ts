@@ -1,7 +1,7 @@
 import { Component, input, output } from '@angular/core';
 import { Creneau, TimetableUserDto } from '@rni/shared';
 import { HalfCell } from '../planning-cells';
-import { PlanningRow } from '../planning.store';
+import { PlanningRow } from './planning-desktop.store';
 
 export interface DayHeader {
   date: string;

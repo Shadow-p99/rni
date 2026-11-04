@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PLANNING_PROFILS, PlanningDto } from '@rni/shared';
 import type { Transaction } from 'sequelize';
+import { termParams, userSearchClauses } from '../../common/sql-search.js';
 import { Db } from '../../database/db.service.js';
 
 export interface UserPlanningRow {
@@ -56,8 +57,10 @@ export class PlanningRepository {
   constructor(private readonly db: Db) {}
 
   /** Personnels portant un planning (profils 3, 4, 7 actifs), dans un périmètre de régions. */
-  async planningUsers(regions: number[] | null, extra: { id_user?: number; nigend?: string } = {}): Promise<UserPlanningRow[]> {
+  async planningUsers(regions: number[] | null, extra: { id_user?: number; nigend?: string; terms?: string[] } = {}): Promise<UserPlanningRow[]> {
     if (regions && !regions.length) return [];
+    const { terms = [], ...ids } = extra;
+    const search = userSearchClauses('u', terms.length).map((c) => `AND ${c}`).join(' ');
     return this.db.select<UserPlanningRow>(
       `SELECT id_user, nigend, grade, abreviation_grade, nom, prenom, id_profil, libelle_profil, classement, poids_grade,
               code_unite, libelle_unite, adresse_unite, x_unite, y_unite, id_departement, libelle_departement, time_zone,
@@ -65,10 +68,11 @@ export class PlanningRepository {
               geoloc_indicatif, geoloc_id_geoloc, geoloc_bool_geoloc, geoloc_bool_indispo
          FROM v_user_detail u
         WHERE NOT bool_user_inactif AND id_profil IN (:profils)${regionClause('u', regions)}
-          ${extra.id_user != null ? 'AND id_user = :id_user' : ''}
-          ${extra.nigend != null ? 'AND nigend = :nigend' : ''}
+          ${ids.id_user != null ? 'AND id_user = :id_user' : ''}
+          ${ids.nigend != null ? 'AND nigend = :nigend' : ''}
+          ${search}
         ORDER BY id_departement NULLS LAST, classement, poids_grade DESC, nom, prenom`,
-      { profils: PLANNING_PROFILS, regions, ...extra },
+      { profils: PLANNING_PROFILS, regions, ...ids, ...termParams(terms) },
     );
   }
 
@@ -77,9 +81,10 @@ export class PlanningRepository {
     start: number,
     end: number,
     regions: number[] | null,
-    filter: { id_pos_service?: number; nigend?: string } = {},
+    filter: { id_pos_service?: number; nigend?: string; id_users?: number[] } = {},
   ): Promise<(PlanningRow & { id_region: number | null })[]> {
     if (regions && !regions.length) return [];
+    if (filter.id_users && !filter.id_users.length) return [];
     return this.db.select(
       `SELECT ${PLANNING_COLUMNS}, ru.id_region
          FROM planning p JOIN ref_user ru ON ru.id_user = p.id_user
@@ -87,6 +92,7 @@ export class PlanningRepository {
           AND NOT ru.bool_user_inactif AND ru.id_profil IN (:profils)${regionClause('ru', regions)}
           ${filter.id_pos_service != null ? 'AND COALESCE(p.id_pos_service, 2) = :id_pos_service' : ''}
           ${filter.nigend != null ? 'AND ru.nigend = :nigend' : ''}
+          ${filter.id_users ? 'AND p.id_user IN (:id_users)' : ''}
         ORDER BY p.slot_debut`,
       { start, end, regions, profils: PLANNING_PROFILS, ...filter },
     );
