@@ -9,9 +9,11 @@ import {
   type LogSettingsValues,
   type LogThreshold,
 } from '@rni/shared';
-import { QueryTypes } from 'sequelize';
+import { Op } from 'sequelize';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
 import { Db } from '../../database/db.service.js';
+import { AppLog, ParamApp, RefUser } from '../../database/models/index.js';
+import { tryAdvisoryXactLock } from '../../database/postgres.js';
 import { ParamService } from '../../modules/external/param.service.js';
 import { BusinessException } from '../business.exception.js';
 import { CacheService, CacheTag } from '../cache/cache.service.js';
@@ -201,20 +203,13 @@ export class LogSettingsService implements OnApplicationBootstrap, OnApplication
   private async clearExpired(expiresAt: string): Promise<void> {
     try {
       const cleared = await this.db.transaction(async (transaction) => {
-        const [{ locked }] = await this.db.select<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock(:k) AS locked', { k: EXPIRY_LOCK }, transaction);
-        if (!locked) return false;
-        // Condition sur la valeur lue : une modification faite entre-temps n'est pas écrasée
-        const [, meta] = await this.db.sequelize.query(
-          `UPDATE t_param_app SET valeur = CASE cle_param_app WHEN :sql THEN 'false' ELSE '' END
-            WHERE cle_param_app IN (:keys)
-              AND (SELECT valeur FROM t_param_app WHERE cle_param_app = :exp) = :expiresAt`,
-          {
-            replacements: { keys: [LogParam.LEVEL, LogParam.CONTEXTS, LogParam.SQL, LogParam.EXPIRES_AT], sql: LogParam.SQL, exp: LogParam.EXPIRES_AT, expiresAt },
-            type: QueryTypes.RAW,
-            transaction,
-          },
-        );
-        return ((meta as { rowCount?: number } | undefined)?.rowCount ?? 0) > 0;
+        if (!(await tryAdvisoryXactLock(this.db.sequelize, EXPIRY_LOCK, transaction))) return false;
+        // Une modification faite entre-temps (nouvelle échéance) n'est pas écrasée
+        const current = await ParamApp.findByPk(LogParam.EXPIRES_AT, { transaction, lock: transaction.LOCK.UPDATE });
+        if (current?.valeur !== expiresAt) return false;
+        await ParamApp.update({ valeur: '' }, { where: { cle_param_app: { [Op.in]: [LogParam.LEVEL, LogParam.CONTEXTS, LogParam.EXPIRES_AT] } }, transaction });
+        await ParamApp.update({ valeur: 'false' }, { where: { cle_param_app: LogParam.SQL }, transaction });
+        return true;
       });
       if (cleared) this.logger.log('Réglages temporaires de journalisation expirés : retour aux valeurs par défaut.');
     } catch (e) {
@@ -238,17 +233,21 @@ export class LogSettingsService implements OnApplicationBootstrap, OnApplication
 
     const [seen, author] = await Promise.all([
       this.cache.wrap('admin:log-contexts', 300_000, () =>
-        this.db
-          .select<{ contexte: string }>(
-            `SELECT DISTINCT contexte FROM t_app_logs WHERE horodatage >= now() - interval '7 days' AND contexte IS NOT NULL LIMIT 200`,
-          )
-          .catch(() => []),
+        AppLog.findAll({
+          attributes: ['contexte'],
+          where: { horodatage: { [Op.gte]: new Date(Date.now() - 7 * 86_400_000) }, contexte: { [Op.ne]: null } },
+          group: ['contexte'],
+          limit: 200,
+          raw: true,
+        }).catch(() => [] as { contexte: string | null }[]),
       ),
       raw.UPDATED_BY
-        ? this.db.one<{ nom: string }>(`SELECT trim(coalesce(grade, '') || ' ' || prenom || ' ' || nom) AS nom FROM ref_user WHERE nigend = :n`, { n: raw.UPDATED_BY })
+        ? RefUser.findOne({ attributes: ['grade', 'prenom', 'nom'], where: { nigend: raw.UPDATED_BY }, raw: true }).then((u) =>
+            u ? { nom: `${u.grade ?? ''} ${u.prenom} ${u.nom}`.trim() } : null,
+          )
         : Promise.resolve(null),
     ]);
-    const known = [...new Set([...KNOWN_CONTEXTS, ...seen.map((s) => s.contexte)])]
+    const known = [...new Set([...KNOWN_CONTEXTS, ...seen.map((s) => s.contexte).filter((c): c is string => !!c)])]
       .filter((c) => LOG_CONTEXT_PATTERN.test(c) && !['RouterExplorer', 'RoutesResolver', 'InstanceLoader', 'NestFactory', 'NestApplication'].includes(c))
       .sort((a, b) => a.localeCompare(b));
 
@@ -302,12 +301,9 @@ export class LogSettingsService implements OnApplicationBootstrap, OnApplication
       [LogParam.UPDATED_AT]: new Date().toISOString(),
     };
     await this.db.transaction(async (transaction) => {
-      for (const [key, valeur] of Object.entries(values)) {
-        await this.db.sequelize.query(
-          `INSERT INTO t_param_app (cle_param_app, valeur, description, is_front) VALUES (:key, :valeur, NULL, false)
-           ON CONFLICT (cle_param_app) DO UPDATE SET valeur = EXCLUDED.valeur`,
-          { replacements: { key, valeur }, type: QueryTypes.RAW, transaction },
-        );
+      for (const [cle_param_app, valeur] of Object.entries(values)) {
+        const [, created] = await ParamApp.findOrCreate({ where: { cle_param_app }, defaults: { cle_param_app, valeur, is_front: false }, transaction });
+        if (!created) await ParamApp.update({ valeur }, { where: { cle_param_app }, transaction });
       }
     });
     // Application immédiate dans ce processus (les autres : notification PostgreSQL)

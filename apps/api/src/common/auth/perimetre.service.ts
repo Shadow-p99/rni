@@ -10,6 +10,7 @@ import {
   defaultPerimetre,
 } from '@rni/shared';
 import { Db } from '../../database/db.service.js';
+import { PerimetreProfil, ProfilClassement, RefProfil, RegionVoisine } from '../../database/models/index.js';
 import { BusinessException } from '../business.exception.js';
 import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
 import type { RniUser } from './current-user.js';
@@ -37,11 +38,9 @@ export class PerimetreService {
         'perimetre:config',
         CacheTtl.PARAM,
         async () => {
-          const rows = await this.db.select<{ id_profil: number; module: PerimetreModule; perimetre: Perimetre }>(
-            'SELECT id_profil, module, perimetre FROM t_perimetre_profil',
-          );
+          const rows = await PerimetreProfil.findAll({ attributes: ['id_profil', 'module', 'perimetre'], raw: true });
           this.logger.debug(`Périmètres chargés : ${rows.length} réglage(s) en base (défauts du cahier des charges pour les autres)`);
-          return (this.lastConfig = new Map(rows.map((r) => [`${r.id_profil}:${r.module}`, r.perimetre])));
+          return (this.lastConfig = new Map(rows.map((r) => [`${r.id_profil}:${r.module}`, r.perimetre as Perimetre])));
         },
         [CacheTag.PARAM],
       );
@@ -67,9 +66,7 @@ export class PerimetreService {
       'ref:voisins',
       CacheTtl.REFERENTIEL,
       async () => {
-        const rows = await this.db.select<{ id_region: number; id_region_voisine: number }>(
-          'SELECT id_region, id_region_voisine FROM ref_nrb_region_r22',
-        );
+        const rows = await RegionVoisine.findAll({ raw: true });
         const map = new Map<number, number[]>();
         for (const r of rows) map.set(r.id_region, [...(map.get(r.id_region) ?? []), r.id_region_voisine]);
         return map;
@@ -114,16 +111,22 @@ export class PerimetreService {
 
   async matrix(): Promise<PerimetreProfilDto[]> {
     const config = await this.loadConfig();
-    const meta = await this.db.select<{ id_profil: number; libelle: string; updated_at: string | null; updated_by: string | null }>(
-      `SELECT p.id_profil, p.libelle,
-              to_char(max(t.updated_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at,
-              (array_agg(t.updated_by ORDER BY t.updated_at DESC))[1] AS updated_by
-         FROM ref_profil p
-         LEFT JOIN t_perimetre_profil t ON t.id_profil = p.id_profil
-         LEFT JOIN t_profil_classement c ON c.id_profil = p.id_profil
-        GROUP BY p.id_profil, p.libelle, c.classement
-        ORDER BY COALESCE(c.classement, 99)`,
-    );
+    const [profils, classements, reglages] = await Promise.all([
+      RefProfil.findAll({ attributes: ['id_profil', 'libelle'], raw: true }),
+      ProfilClassement.findAll({ raw: true }),
+      PerimetreProfil.findAll({ attributes: ['id_profil', 'updated_at', 'updated_by'], raw: true }),
+    ]);
+    const rank = new Map(classements.map((c) => [c.id_profil, c.classement]));
+    // Dernière modification par profil (tous modules confondus)
+    const last = new Map<number, { at: Date; by: string | null }>();
+    for (const r of reglages) {
+      const cur = last.get(r.id_profil);
+      if (!cur || new Date(r.updated_at) > cur.at) last.set(r.id_profil, { at: new Date(r.updated_at), by: r.updated_by });
+    }
+    const meta = profils
+      .map((p) => ({ id_profil: p.id_profil, libelle: p.libelle, rank: rank.get(p.id_profil) ?? 99, last: last.get(p.id_profil) }))
+      .sort((a, b) => a.rank - b.rank)
+      .map((p) => ({ ...p, updated_at: p.last ? p.last.at.toISOString().replace(/\.\d{3}Z$/, 'Z') : null, updated_by: p.last?.by ?? null }));
     return meta.map((m) => {
       const locked = LOCKED_PERIMETRE_PROFILS.includes(m.id_profil);
       const get = (mod: PerimetreModule): Perimetre =>
@@ -134,7 +137,7 @@ export class PerimetreService {
 
   async update(dto: PerimetreUpdateDto, by: string): Promise<PerimetreProfilDto[]> {
     if (!Array.isArray(dto?.items) || !dto.items.length) throw BusinessException.missing('items');
-    const profils = new Set((await this.db.select<{ id_profil: number }>('SELECT id_profil FROM ref_profil')).map((p) => p.id_profil));
+    const profils = new Set((await RefProfil.findAll({ attributes: ['id_profil'], raw: true })).map((p) => p.id_profil));
     for (const i of dto.items) {
       if (!profils.has(i.id_profil)) throw BusinessException.invalid(`Profil inconnu : ${i.id_profil}.`);
       if (!PERIMETRE_MODULES.includes(i.module)) throw BusinessException.invalid(`Module inconnu : ${i.module}.`);
@@ -143,15 +146,14 @@ export class PerimetreService {
         throw BusinessException.forbidden('Le périmètre du super administrateur est toujours national.');
       }
     }
-    await this.db.transaction(async (t) => {
+    await this.db.transaction(async (transaction) => {
+      const current = await PerimetreProfil.findAll({ transaction, lock: transaction.LOCK.UPDATE });
+      const byKey = new Map(current.map((c) => [`${c.id_profil}:${c.module}`, c]));
       for (const i of dto.items) {
-        await this.db.sequelize.query(
-          `INSERT INTO t_perimetre_profil (id_profil, module, perimetre, updated_at, updated_by)
-           VALUES (:id_profil, :module, :perimetre, now(), :by)
-           ON CONFLICT (id_profil, module) DO UPDATE SET perimetre = EXCLUDED.perimetre, updated_at = now(), updated_by = EXCLUDED.updated_by
-           WHERE t_perimetre_profil.perimetre IS DISTINCT FROM EXCLUDED.perimetre`,
-          { replacements: { ...i, by }, transaction: t },
-        );
+        const existing = byKey.get(`${i.id_profil}:${i.module}`);
+        // Seules les valeurs réellement modifiées changent (date et auteur de modification)
+        if (existing?.perimetre === i.perimetre) continue;
+        await PerimetreProfil.upsert({ id_profil: i.id_profil, module: i.module, perimetre: i.perimetre, updated_at: new Date(), updated_by: by }, { transaction });
       }
     });
     this.invalidate();

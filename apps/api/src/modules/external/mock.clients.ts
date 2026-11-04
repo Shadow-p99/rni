@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { BaseLayerDto, ErrorCode, GeocodeCandidate, IsochroneCollection, NeoLineDto } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
-import { Db } from '../../database/db.service.js';
+import { Op } from 'sequelize';
+import { PersonnelRpsi, RefUnite, RefUser, UserDetail } from '../../database/models/index.js';
 import type { FacadeClient, GeolocClient, GeolocPosition, RemopClient } from './external.types.js';
 
 /**
@@ -11,14 +12,14 @@ import type { FacadeClient, GeolocClient, GeolocPosition, RemopClient } from './
 
 @Injectable()
 export class MockGeolocClient implements GeolocClient {
-  constructor(private readonly db: Db) {}
-
   async positions(): Promise<GeolocPosition[]> {
-    const rows = await this.db.select<{ id_user: number; geoloc_indicatif: string; x: number; y: number }>(
-      `SELECT ru.id_user, ru.geoloc_indicatif, un.x, un.y
-         FROM ref_user ru JOIN ref_unite un ON un.code_unite = ru.code_unite
-        WHERE ru.geoloc_indicatif IS NOT NULL AND ru.geoloc_id_geoloc IS NOT NULL AND un.x IS NOT NULL`,
-    );
+    const rows = (
+      await UserDetail.findAll({
+        attributes: ['id_user', 'geoloc_indicatif', 'x_unite', 'y_unite'],
+        where: { geoloc_indicatif: { [Op.ne]: null }, geoloc_id_geoloc: { [Op.ne]: null }, x_unite: { [Op.ne]: null } },
+        raw: true,
+      })
+    ).map((r) => ({ id_user: r.id_user, geoloc_indicatif: r.geoloc_indicatif!, x: r.x_unite!, y: r.y_unite! }));
     const t = Date.now() / 600_000; // dérive lente (10 min)
     return rows.map((r) => {
       const a = r.id_user * 2.399 + t * 0.05;
@@ -37,16 +38,12 @@ export class MockGeolocClient implements GeolocClient {
 
 @Injectable()
 export class MockRemopClient implements RemopClient {
-  constructor(private readonly db: Db) {}
-
   async lines(nigend: string): Promise<NeoLineDto[]> {
-    const p = await this.db.one<{ numero_neo_1: string | null; numero_neo_2: string | null }>(
-      `SELECT COALESCE(ru.numero_neo_1, rp.numero_neo_1) AS numero_neo_1, COALESCE(ru.numero_neo_2, rp.numero_neo_2) AS numero_neo_2
-         FROM (SELECT :nigend::varchar AS nigend) n
-         LEFT JOIN ref_user ru ON ru.nigend = n.nigend
-         LEFT JOIN rpsi_personnel rp ON rp.nigend = n.nigend`,
-      { nigend },
-    );
+    const [ru, rp] = await Promise.all([
+      RefUser.findOne({ attributes: ['numero_neo_1', 'numero_neo_2'], where: { nigend }, raw: true }),
+      PersonnelRpsi.findByPk(nigend, { attributes: ['numero_neo_1', 'numero_neo_2'], raw: true }),
+    ]);
+    const p = { numero_neo_1: ru?.numero_neo_1 ?? rp?.numero_neo_1 ?? null, numero_neo_2: ru?.numero_neo_2 ?? rp?.numero_neo_2 ?? null };
     const nums = [p?.numero_neo_1, ...(p?.numero_neo_2 ?? '').split(',')]
       .map((s) => s?.trim())
       .filter((s): s is string => !!s);
@@ -80,8 +77,6 @@ const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCa
 
 @Injectable()
 export class MockFacadeClient implements FacadeClient {
-  constructor(private readonly db: Db) {}
-
   async baseLayers(): Promise<BaseLayerDto[]> {
     const geopf = 'https://data.geopf.fr/wmts';
     return [
@@ -95,10 +90,8 @@ export class MockFacadeClient implements FacadeClient {
     const q = norm(address.trim());
     if (!q) throw new BusinessException(ErrorCode.AUCUNE_ADRESSE);
     const out: GeocodeCandidate[] = [];
-    const units = await this.db.select<{ adresse: string; x: number; y: number }>(
-      `SELECT adresse, x, y FROM ref_unite WHERE adresse IS NOT NULL AND x IS NOT NULL`,
-    );
-    for (const u of units) if (norm(u.adresse).includes(q)) out.push({ address: u.adresse, x: u.x, y: u.y, score: 100 });
+    const units = await RefUnite.findAll({ attributes: ['adresse', 'x', 'y'], where: { adresse: { [Op.ne]: null }, x: { [Op.ne]: null } }, raw: true });
+    for (const u of units) if (u.adresse && u.x != null && u.y != null && norm(u.adresse).includes(q)) out.push({ address: u.adresse, x: u.x, y: u.y, score: 100 });
     for (const [name, cp, x, y] of CITIES) {
       const n = norm(name);
       if (n.startsWith(q) || q.includes(n) || cp.startsWith(q)) {

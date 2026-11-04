@@ -9,9 +9,9 @@ describe('liste du personnel : utilitaires SQL', () => {
     expect(searchTerms('')).toEqual([]);
   });
   it('tri sur liste blanche, toujours départagé par id_user', () => {
-    expect(orderBy('nom', 'desc')).toBe('s.nom DESC, s.prenom DESC, s.id_user DESC');
-    expect(orderBy(undefined, undefined)).toContain('s.classement');
-    expect(orderBy('inconnu' as never, 'asc')).toContain('s.classement');
-    for (const s of ['nom', 'nigend', 'unite', 'region', 'profil'] as const) expect(orderBy(s, 'asc')).toMatch(/id_user/);
+    expect(orderBy('nom', 'desc')).toEqual([['nom', 'DESC'], ['prenom', 'DESC'], ['id_user', 'DESC']]);
+    expect(JSON.stringify(orderBy(undefined, undefined))).toContain('classement');
+    expect(JSON.stringify(orderBy('inconnu' as never, 'asc'))).toContain('classement');
+    for (const s of ['nom', 'nigend', 'unite', 'region', 'profil'] as const) expect(JSON.stringify(orderBy(s, 'asc'))).toMatch(/id_user/);
   });
 });

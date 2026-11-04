@@ -17,7 +17,9 @@ import { NoAudit, Profiles, Public } from '../../common/auth/decorators.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService } from '../../common/cache/cache.service.js';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
+import { Op } from 'sequelize';
 import { Db } from '../../database/db.service.js';
+import { RefUser, UserDetail } from '../../database/models/index.js';
 import { FACADE_CLIENT, type FacadeClient, GEOLOC_CLIENT, type GeolocClient, REMOP_CLIENT, type RemopClient } from '../external/external.types.js';
 import { ParamService } from '../external/param.service.js';
 import { UsersService } from '../users/users.service.js';
@@ -61,9 +63,9 @@ export class ServiceController {
     let database: AppInfoDto['database'] = { ok: false };
     let permanence: string | null = null;
     try {
-      const r = await this.db.one<{ name: string; version: string }>('SELECT current_database() AS name, version() AS version');
+      const version = await this.db.sequelize.databaseVersion();
       // Version du serveur PostgreSQL : information utile en recette, masquée en production.
-      database = { ok: true, name: r?.name, ...(this.cfg.isProduction ? {} : { version: r?.version?.split(' ').slice(0, 2).join(' ') }) };
+      database = { ok: true, name: this.cfg.db.database, ...(this.cfg.isProduction ? {} : { version: `PostgreSQL ${version.split(' ')[0]}` }) };
       permanence = await this.params.get('rni.permanence.gign');
     } catch {
       /* base indisponible : renseigné par ok=false */
@@ -79,14 +81,14 @@ export class ServiceController {
     };
   }
 
-  /** Sonde de vie : `SELECT 'Base RNI OK'` (sans journalisation Splunk). */
+  /** Sonde de vie : connexion à la base vérifiée (sans journalisation Splunk). */
   @Get('alive')
   @Public()
   @NoAudit()
   async alive(): Promise<{ status: string }> {
     try {
-      const r = await this.db.one<{ status: string }>(`SELECT 'Base RNI OK' AS status`);
-      return { status: r!.status };
+      await this.db.sequelize.authenticate({ logging: false });
+      return { status: 'Base RNI OK' };
     } catch {
       throw new BusinessException(ErrorCode.BASE_INDISPONIBLE, undefined, 503);
     }
@@ -151,10 +153,13 @@ export class ServiceController {
     const positions = await this.geoloc.positions();
     const regions = user.perimetres.carte;
     if (regions == null) return positions;
-    const allowed = await this.db.select<{ geoloc_indicatif: string }>(
-      `SELECT geoloc_indicatif FROM ref_user WHERE geoloc_indicatif IS NOT NULL AND NOT bool_user_inactif AND id_region IN (:regions)`,
-      { regions: regions.length ? regions : [-1] },
-    );
+    const allowed = regions.length
+      ? await RefUser.findAll({
+          attributes: ['geoloc_indicatif'],
+          where: { geoloc_indicatif: { [Op.ne]: null }, bool_user_inactif: false, id_region: { [Op.in]: regions } },
+          raw: true,
+        })
+      : [];
     const set = new Set(allowed.map((a) => a.geoloc_indicatif));
     return positions.filter((p) => set.has(p.indicatif));
   }
@@ -190,12 +195,31 @@ export class ServiceController {
   @NoAudit()
   async mockUsers(): Promise<MockUserDto[]> {
     if (!this.cfg.mockAuth) throw BusinessException.notFound();
-    const rows = await this.db.select<MockUserDto & { rn: number }>(
-      `SELECT nigend, nom, prenom, id_profil, libelle_profil, libelle_region, rn FROM (
-         SELECT u.*, row_number() OVER (PARTITION BY id_profil ORDER BY (id_region = 11) DESC NULLS LAST, id_region, nigend) AS rn
-           FROM v_user_detail u WHERE NOT bool_user_inactif) s
-        WHERE rn <= 3 ORDER BY classement, rn`,
-    );
-    return rows.map(({ rn: _rn, ...r }) => ({ ...r, libelle_profil: r.libelle_profil ?? PROFIL_LIBELLES[r.id_profil as Profil] }));
+    const users = await UserDetail.findAll({
+      attributes: ['nigend', 'nom', 'prenom', 'id_profil', 'libelle_profil', 'libelle_region', 'id_region', 'classement'],
+      where: { bool_user_inactif: false },
+      raw: true,
+    });
+    // 3 comptes par profil, Île-de-France (11) d'abord
+    const key = (u: (typeof users)[number]) => [u.id_region === 11 ? 0 : 1, u.id_region ?? 9999, u.nigend] as const;
+    const byProfil = new Map<number, typeof users>();
+    for (const u of [...users].sort((a, b) => {
+      const ka = key(a), kb = key(b);
+      return ka[0] - kb[0] || ka[1] - kb[1] || ka[2].localeCompare(kb[2]);
+    })) {
+      const list = byProfil.get(u.id_profil) ?? [];
+      if (list.length < 3) byProfil.set(u.id_profil, [...list, u]);
+    }
+    return [...byProfil.values()]
+      .sort((a, b) => a[0].classement - b[0].classement)
+      .flat()
+      .map((r) => ({
+        nigend: r.nigend,
+        nom: r.nom,
+        prenom: r.prenom,
+        id_profil: r.id_profil,
+        libelle_profil: r.libelle_profil ?? PROFIL_LIBELLES[r.id_profil as Profil],
+        libelle_region: r.libelle_region,
+      }));
   }
 }

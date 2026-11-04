@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
-import { QueryTypes } from 'sequelize';
-import { Db } from '../../database/db.service.js';
+import { localParts } from '@rni/shared';
+import { Op, UniqueConstraintError } from 'sequelize';
+import { RequestMetric, UserActivity } from '../../database/models/index.js';
 import { currentLogSettings } from '../logging/log-settings.service.js';
 
 interface Agg {
@@ -27,6 +28,8 @@ interface Activity {
 
 const FLUSH_MS = 10_000;
 
+const OPTS = { logging: false } as const;
+
 /** Motif de route : `/rni/api/planning/:id` plutôt que chaque identifiant (agrégation bornée). */
 export function routePattern(matched: string | undefined, path: string): string {
   if (matched && matched !== '*' && !matched.includes('*')) return matched.slice(0, 256);
@@ -50,8 +53,6 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
   private activity = new Map<string, Activity>();
   private timer: NodeJS.Timeout | null = null;
   private flushing: Promise<void> | null = null;
-
-  constructor(private readonly db: Db) {}
 
   onApplicationBootstrap(): void {
     this.timer = setInterval(() => void this.flush(), FLUSH_MS);
@@ -105,48 +106,9 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
     this.aggs = new Map();
     this.activity = new Map();
     try {
-      if (aggs.length) {
-        const values: unknown[] = [];
-        const rows = aggs.map((a, i) => {
-          values.push(a.minute, a.route, a.methode, a.nb, a.nb_4xx, a.nb_5xx, a.nb_lentes, a.total, a.max, a.lt100, a.lt300, a.lt1000, a.lt3000);
-          const o = i * 13;
-          return `(${Array.from({ length: 13 }, (_, k) => `$${o + k + 1}`).join(',')})`;
-        });
-        await this.db.sequelize.query(
-          `INSERT INTO t_request_metrics (minute, route, methode, nb, nb_4xx, nb_5xx, nb_lentes, duree_totale_ms, duree_max_ms, nb_lt100, nb_lt300, nb_lt1000, nb_lt3000)
-           VALUES ${rows.join(',')}
-           ON CONFLICT (minute, route, methode) DO UPDATE SET
-             nb = t_request_metrics.nb + EXCLUDED.nb,
-             nb_4xx = t_request_metrics.nb_4xx + EXCLUDED.nb_4xx,
-             nb_5xx = t_request_metrics.nb_5xx + EXCLUDED.nb_5xx,
-             nb_lentes = t_request_metrics.nb_lentes + EXCLUDED.nb_lentes,
-             duree_totale_ms = t_request_metrics.duree_totale_ms + EXCLUDED.duree_totale_ms,
-             duree_max_ms = GREATEST(t_request_metrics.duree_max_ms, EXCLUDED.duree_max_ms),
-             nb_lt100 = t_request_metrics.nb_lt100 + EXCLUDED.nb_lt100,
-             nb_lt300 = t_request_metrics.nb_lt300 + EXCLUDED.nb_lt300,
-             nb_lt1000 = t_request_metrics.nb_lt1000 + EXCLUDED.nb_lt1000,
-             nb_lt3000 = t_request_metrics.nb_lt3000 + EXCLUDED.nb_lt3000`,
-          { bind: values, type: QueryTypes.INSERT, logging: false },
-        );
-      }
-      if (activity.length) {
-        const values: unknown[] = [];
-        const rows = activity.map(([nigend, u], i) => {
-          values.push(nigend, u.last, u.route.slice(0, 256), u.count);
-          const o = i * 4;
-          return `($${o + 1}, $${o + 2}::timestamptz, $${o + 3}, ($${o + 2}::timestamptz AT TIME ZONE 'Europe/Paris')::date, $${o + 4}::int)`;
-        });
-        await this.db.sequelize.query(
-          `INSERT INTO t_user_activity AS t (nigend, derniere_activite, derniere_route, jour, nb_requetes_jour)
-           VALUES ${rows.join(',')}
-           ON CONFLICT (nigend) DO UPDATE SET
-             nb_requetes_jour = CASE WHEN t.jour = EXCLUDED.jour THEN t.nb_requetes_jour + EXCLUDED.nb_requetes_jour ELSE EXCLUDED.nb_requetes_jour END,
-             derniere_route = CASE WHEN EXCLUDED.derniere_activite >= t.derniere_activite THEN EXCLUDED.derniere_route ELSE t.derniere_route END,
-             jour = GREATEST(t.jour, EXCLUDED.jour),
-             derniere_activite = GREATEST(t.derniere_activite, EXCLUDED.derniere_activite)`,
-          { bind: values, type: QueryTypes.INSERT, logging: false },
-        );
-      }
+      for (const a of aggs) await this.addMetric(a);
+      const today = localParts(new Date(), 'Europe/Paris').date;
+      for (const [nigend, u] of activity) await this.addActivity(nigend, u, today);
       this.logger.verbose(`Métriques écrites : ${aggs.length} agrégat(s), ${activity.length} utilisateur(s)`);
     } catch (e) {
       // Base indisponible : remise en attente (fusion) pour le prochain essai
@@ -171,5 +133,62 @@ export class MetricsService implements OnApplicationBootstrap, OnApplicationShut
       for (const [n, u] of activity) if (!this.activity.has(n)) this.activity.set(n, u);
       this.logger.warn(`Écriture des métriques reportée : ${(e as Error).message}`);
     }
+  }
+
+  /**
+   * Ajout atomique aux compteurs de la minute (plusieurs workers écrivent la même ligne) :
+   * incrément, sinon création ; création concurrente → nouvel incrément.
+   */
+  private async addMetric(a: Agg, retry = true): Promise<void> {
+    const where = { minute: a.minute, route: a.route, methode: a.methode };
+    const by = {
+      nb: a.nb,
+      nb_4xx: a.nb_4xx,
+      nb_5xx: a.nb_5xx,
+      nb_lentes: a.nb_lentes,
+      duree_totale_ms: a.total,
+      nb_lt100: a.lt100,
+      nb_lt300: a.lt300,
+      nb_lt1000: a.lt1000,
+      nb_lt3000: a.lt3000,
+    };
+    if (await this.increment(RequestMetric, by, where)) {
+      await RequestMetric.update({ duree_max_ms: a.max }, { where: { ...where, duree_max_ms: { [Op.lt]: a.max } }, ...OPTS });
+      return;
+    }
+    try {
+      await RequestMetric.create({ ...where, ...by, duree_max_ms: a.max }, OPTS);
+    } catch (e) {
+      if (retry && e instanceof UniqueConstraintError) return this.addMetric(a, false);
+      throw e;
+    }
+  }
+
+  /** Activité d'un utilisateur : compteur du jour (remis à zéro au changement de jour), dernière page. */
+  private async addActivity(nigend: string, u: Activity, today: string, retry = true): Promise<void> {
+    const sameDay = await this.increment(UserActivity, { nb_requetes_jour: u.count }, { nigend, jour: today });
+    if (!sameDay) {
+      const [newDay] = await UserActivity.update({ jour: today, nb_requetes_jour: u.count }, { where: { nigend, jour: { [Op.lt]: today } }, ...OPTS });
+      if (!newDay) {
+        try {
+          await UserActivity.create({ nigend, jour: today, nb_requetes_jour: u.count, derniere_activite: u.last, derniere_route: u.route.slice(0, 256) }, OPTS);
+          return;
+        } catch (e) {
+          if (retry && e instanceof UniqueConstraintError) return this.addActivity(nigend, u, today, false);
+          throw e;
+        }
+      }
+    }
+    await UserActivity.update(
+      { derniere_activite: u.last, derniere_route: u.route.slice(0, 256) },
+      { where: { nigend, derniere_activite: { [Op.lt]: u.last } }, ...OPTS },
+    );
+  }
+
+  /** `Model.increment` : nombre de lignes modifiées (0 si la ligne n'existe pas encore). */
+  private async increment(model: typeof RequestMetric | typeof UserActivity, by: Record<string, number>, where: Record<string, unknown>): Promise<number> {
+    // PostgreSQL : [[lignes modifiées, nombre]]
+    const result = (await (model as typeof RequestMetric).increment(by, { where: where as never, ...OPTS })) as unknown as [[unknown[], number]];
+    return Number(result?.[0]?.[1] ?? 0);
   }
 }

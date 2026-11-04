@@ -1,22 +1,37 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { ErrorCode, FORMULAIRE_FIELDS, FormulaireDto, FormulaireFilter, hasNameOrFirstName, isIsoDate, isNationalAdmin } from '@rni/shared';
+import { ErrorCode, FORMULAIRE_FIELDS, FormulaireDto, FormulaireFilter, addDays, hasNameOrFirstName, isIsoDate, isNationalAdmin, zonedMidnight } from '@rni/shared';
+import { Op, type WhereOptions } from 'sequelize';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
-import { Db } from '../../database/db.service.js';
-import { Formulaire } from '../../database/models/index.js';
+import { Formulaire, RefUser } from '../../database/models/index.js';
 import { sanitizeFormulaire } from './formulaire.sanitize.js';
 
-const CONTENT_COLUMNS = [...FORMULAIRE_FIELDS.map((f) => `f.${f.key}`), 'f.terrain_x', 'f.terrain_y'].join(', ');
+const CONTENT_ATTRIBUTES = [...FORMULAIRE_FIELDS.map((f) => f.key), 'terrain_x', 'terrain_y'];
 
-const SELECT = `
-  SELECT f.id_formulaire, f.id_user, ${CONTENT_COLUMNS}, f.is_closed,
-         to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
-         to_char(f.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at,
-         ru.nigend AS auteur_nigend, trim(coalesce(ru.grade, '') || ' ' || ru.prenom || ' ' || ru.nom) AS auteur_nom,
-         ru.id_region AS auteur_id_region
-    FROM t_formulaire f JOIN ref_user ru ON ru.id_user = f.id_user`;
+type FormulaireWithAuteur = Formulaire & { auteur?: { nigend: string; grade: string | null; prenom: string; nom: string; id_region: number | null } };
+
+/** Horodatage ISO sans millisecondes (format historique de l'API). */
+const iso = (d: Date | string) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+function toDto(f: FormulaireWithAuteur): FormulaireDto {
+  const a = f.auteur;
+  const content = Object.fromEntries(CONTENT_ATTRIBUTES.map((k) => [k, f.get(k) ?? null]));
+  return {
+    ...(content as unknown as FormulaireDto),
+    id_formulaire: f.id_formulaire,
+    id_user: f.id_user,
+    is_closed: f.is_closed,
+    created_at: iso(f.created_at),
+    updated_at: iso(f.updated_at),
+    auteur_nigend: a?.nigend ?? '',
+    auteur_nom: a ? `${a.grade ?? ''} ${a.prenom} ${a.nom}`.trim() : '',
+    auteur_id_region: a?.id_region ?? null,
+  };
+}
+
+const AUTEUR = { model: RefUser, as: 'auteur', attributes: ['nigend', 'grade', 'prenom', 'nom', 'id_region'], required: true };
 
 @Injectable()
 export class FormulaireService {
@@ -24,7 +39,6 @@ export class FormulaireService {
   private readonly logger = new Logger(FormulaireService.name);
 
   constructor(
-    private readonly db: Db,
     private readonly adminLog: AdminLogService,
     @InjectModel(Formulaire) private readonly formulaires: typeof Formulaire,
   ) {}
@@ -39,15 +53,17 @@ export class FormulaireService {
     if (!national && region == null) return [];
     if (filter.from && !isIsoDate(filter.from)) throw BusinessException.invalid('Date de début invalide.');
     if (filter.to && !isIsoDate(filter.to)) throw BusinessException.invalid('Date de fin invalide.');
-    const where: string[] = [];
-    if (region != null) where.push('ru.id_region = :region');
-    if (filter.closed != null) where.push('f.is_closed = :closed');
-    if (filter.from) where.push(`f.updated_at >= (:from::date)::timestamp AT TIME ZONE 'Europe/Paris'`);
-    if (filter.to) where.push(`f.updated_at < ((:to::date) + 1)::timestamp AT TIME ZONE 'Europe/Paris'`);
-    const rows = await this.db.select<FormulaireDto>(
-      `${SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY f.updated_at DESC`,
-      { region, closed: filter.closed, from: filter.from, to: filter.to },
-    );
+    const where: WhereOptions[] = [];
+    if (filter.closed != null) where.push({ is_closed: filter.closed });
+    // Bornes de dates en heure de Paris (journée complète pour « au »)
+    if (filter.from) where.push({ updated_at: { [Op.gte]: zonedMidnight(filter.from) } });
+    if (filter.to) where.push({ updated_at: { [Op.lt]: zonedMidnight(addDays(filter.to, 1)) } });
+    const found = await Formulaire.findAll({
+      where: { [Op.and]: where },
+      include: [{ ...AUTEUR, ...(region != null ? { where: { id_region: region } } : {}) }],
+      order: [['updated_at', 'DESC']],
+    });
+    const rows = found.map((f) => toDto(f as FormulaireWithAuteur));
     this.logger.debug(
       `Fiches de crise (${user.nigend}) : région ${region ?? 'toutes'}, clôturées ${filter.closed ?? 'toutes'}, ${filter.from ?? '…'} → ${filter.to ?? '…'} : ${rows.length} fiche(s)`,
     );
@@ -55,8 +71,9 @@ export class FormulaireService {
   }
 
   async get(user: RniUser, id: number): Promise<FormulaireDto> {
-    const row = await this.db.one<FormulaireDto>(`${SELECT} WHERE f.id_formulaire = :id`, { id });
-    if (!row) throw BusinessException.notFound('Fiche introuvable.');
+    const found = await Formulaire.findByPk(id, { include: [AUTEUR] });
+    if (!found) throw BusinessException.notFound('Fiche introuvable.');
+    const row = toDto(found as FormulaireWithAuteur);
     if (!isNationalAdmin(user.id_profil) && row.auteur_id_region !== user.id_region) {
       this.logger.warn(`Fiche ${id} (région ${row.auteur_id_region}) refusée à ${user.nigend} (région ${user.id_region}) : hors périmètre.`);
       throw new BusinessException(ErrorCode.HORS_PERIMETRE, undefined, 403);

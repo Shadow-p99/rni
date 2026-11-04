@@ -4,16 +4,10 @@ import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService, CacheTag, CacheTtl, JsonPayload, regionsKey } from '../../common/cache/cache.service.js';
-import { Db } from '../../database/db.service.js';
+import { Op } from 'sequelize';
+import { RefRegion, RegionCenter } from '../../database/models/index.js';
 import { PlanningService } from '../planning/planning.service.js';
 
-interface RegionRow {
-  id_region: number;
-  libelle: string;
-  x: number | null;
-  y: number | null;
-  zoom: number | null;
-}
 
 function toModule(v?: string): PerimetreModule {
   if (v == null || v === '' || v === 'planning') return 'planning';
@@ -24,7 +18,6 @@ function toModule(v?: string): PerimetreModule {
 @Controller('region')
 export class RegionController {
   constructor(
-    private readonly db: Db,
     private readonly perimetre: PerimetreService,
     private readonly planning: PlanningService,
     private readonly cache: CacheService,
@@ -36,17 +29,16 @@ export class RegionController {
   }
 
   private async loadRegions(ids: number[] | null): Promise<RegionDto[]> {
-    const rows = await this.db.select<RegionRow>(
-      `SELECT r.id_region, r.libelle, c.x, c.y, c.zoom
-         FROM ref_regions r LEFT JOIN t_region_center c ON c.id_region = r.id_region
-        ${ids ? 'WHERE r.id_region IN (:ids)' : ''} ORDER BY r.libelle`,
-      { ids },
-    );
-    return rows.map((r) => ({
-      id_region: r.id_region,
-      libelle: r.libelle,
-      center: r.x != null && r.y != null ? { lat: r.y, lng: r.x, zoom: r.zoom ?? 7 } : null,
-    }));
+    const where = ids ? { id_region: { [Op.in]: ids } } : {};
+    const [regions, centers] = await Promise.all([
+      RefRegion.findAll({ where, order: [['libelle', 'ASC']], raw: true }),
+      RegionCenter.findAll({ where, raw: true }),
+    ]);
+    const byId = new Map(centers.map((c) => [c.id_region, c]));
+    return regions.map((r) => {
+      const c = byId.get(r.id_region);
+      return { id_region: r.id_region, libelle: r.libelle, center: c ? { lat: c.y, lng: c.x, zoom: c.zoom ?? 7 } : null };
+    });
   }
 
   /**

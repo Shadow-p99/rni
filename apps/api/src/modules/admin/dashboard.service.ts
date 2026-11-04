@@ -9,7 +9,11 @@ import { LogSettingsService } from '../../common/logging/log-settings.service.js
 import { LOG_LEVELS } from '../../common/runtime/logger.js';
 import { LifecycleService } from '../../common/runtime/lifecycle.service.js';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
+import { Op, col, fn, type WhereOptions } from 'sequelize';
+import { localParts, startOfLocalDay } from '@rni/shared';
 import { Db } from '../../database/db.service.js';
+import { AppLog, Formulaire, Planning, ProfilClassement, RefProfil, RefUser, RequestMetric, SchemaMigration, UserActivity, UserDetail } from '../../database/models/index.js';
+import { databaseStats } from '../../database/postgres.js';
 import { ParamService } from '../external/param.service.js';
 
 const VERSION = (() => {
@@ -20,11 +24,26 @@ const VERSION = (() => {
   }
 })();
 
-/** Début de la journée en cours, heure de Paris (les compteurs « du jour » en dépendent). */
-const DAY_START = `(date_trunc('day', now() AT TIME ZONE 'Europe/Paris') AT TIME ZONE 'Europe/Paris')`;
+const logDto = (l: AppLog): AppLogDto => ({
+  id_log: Number(l.id_log),
+  horodatage: new Date(l.horodatage).toISOString(),
+  niveau: l.niveau as AppLogLevel,
+  contexte: l.contexte,
+  message: l.message,
+  pile: l.pile,
+  request_id: l.request_id,
+  nigend: l.nigend,
+  pid: l.pid,
+  hote: l.hote,
+});
 
-const LOG_COLUMNS = `id_log::int AS id_log, to_char(horodatage AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS horodatage,
-  niveau, contexte, message, pile, request_id, nigend, pid, hote`;
+/** Agrégats des métriques (sommes nulles → 0). */
+const SUMS = (['nb', 'nb_4xx', 'nb_5xx', 'nb_lentes', 'duree_totale_ms', 'nb_lt100', 'nb_lt300', 'nb_lt1000', 'nb_lt3000'] as const).map(
+  (c) => [fn('COALESCE', fn('sum', col(c)), 0), c] as [ReturnType<typeof fn>, string],
+);
+
+/** ISO sans millisecondes (format historique de l'API). */
+const isoS = (d: Date | string) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 interface MetricsTotals {
   nb: number;
@@ -57,6 +76,20 @@ export function p95(t: Pick<MetricsTotals, 'nb' | 'lt100' | 'lt300' | 'lt1000' |
 
 const int = (v: unknown) => Number(v ?? 0) || 0;
 
+function totalsOf(r: Record<string, unknown> | null | undefined): MetricsTotals {
+  return {
+    nb: int(r?.['nb']),
+    nb_4xx: int(r?.['nb_4xx']),
+    nb_5xx: int(r?.['nb_5xx']),
+    nb_lentes: int(r?.['nb_lentes']),
+    total_ms: int(r?.['duree_totale_ms']),
+    lt100: int(r?.['nb_lt100']),
+    lt300: int(r?.['nb_lt300']),
+    lt1000: int(r?.['nb_lt1000']),
+    lt3000: int(r?.['nb_lt3000']),
+  };
+}
+
 /**
  * Tableau de bord d'administration : activité, performances et erreurs de **toutes** les instances
  * (données en base, alimentées par chaque processus), état du processus qui répond, indicateurs
@@ -83,82 +116,111 @@ export class DashboardService {
   private async build(): Promise<AdminDashboardDto> {
     const t0 = Date.now();
     const windowMin = Math.min(Math.max(int(await this.params.get('rni.dashboard.active_minutes')) || 5, 1), 120);
+    const now = new Date();
+    const dayStart = startOfLocalDay(now);
+    const today = localParts(now, 'Europe/Paris').date;
+    const activeSince = new Date(now.getTime() - windowMin * 60_000);
+    const hourStart = new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000);
+    const firstHour = new Date(hourStart.getTime() - 23 * 3_600_000);
 
-    const totals = (where: string) =>
-      this.db.one<MetricsTotals>(
-        `SELECT COALESCE(sum(nb),0)::int AS nb, COALESCE(sum(nb_4xx),0)::int AS nb_4xx, COALESCE(sum(nb_5xx),0)::int AS nb_5xx,
-                COALESCE(sum(nb_lentes),0)::int AS nb_lentes, COALESCE(sum(duree_totale_ms),0)::bigint AS total_ms,
-                COALESCE(sum(nb_lt100),0)::int AS lt100, COALESCE(sum(nb_lt300),0)::int AS lt300,
-                COALESCE(sum(nb_lt1000),0)::int AS lt1000, COALESCE(sum(nb_lt3000),0)::int AS lt3000
-           FROM t_request_metrics WHERE ${where}`,
-      );
+    const totals = async (since: Date) =>
+      totalsOf((await RequestMetric.findOne({ attributes: SUMS, where: { minute: { [Op.gte]: since } }, raw: true })) as unknown as Record<string, unknown> | null);
 
-    const [day, hour, last5, levels, hours, routes, connected, todayUsers, lastErrors, metier, profils, base, journal] = await Promise.all([
-      totals(`minute >= ${DAY_START}`),
-      totals(`minute >= now() - interval '1 hour'`),
-      totals(`minute >= date_trunc('minute', now()) - interval '5 minutes'`),
-      this.db.select<{ niveau: string; nb: number }>(
-        `SELECT niveau, count(*)::int AS nb FROM t_app_logs WHERE horodatage >= ${DAY_START} AND niveau IN ('fatal','error','warn') GROUP BY niveau`,
-      ),
-      this.db.select<{ heure: string; nb: number; nb_4xx: number; nb_5xx: number; total: number; max_ms: number }>(
-        `SELECT to_char(h.heure AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS heure,
-                COALESCE(sum(m.nb),0)::int AS nb, COALESCE(sum(m.nb_4xx),0)::int AS nb_4xx, COALESCE(sum(m.nb_5xx),0)::int AS nb_5xx,
-                COALESCE(sum(m.duree_totale_ms),0)::bigint AS total, COALESCE(max(m.duree_max_ms),0)::int AS max_ms
-           FROM generate_series(date_trunc('hour', now()) - interval '23 hours', date_trunc('hour', now()), interval '1 hour') AS h(heure)
-           LEFT JOIN t_request_metrics m ON m.minute >= h.heure AND m.minute < h.heure + interval '1 hour'
-          GROUP BY h.heure ORDER BY h.heure`,
-      ),
-      this.db.select<MetricsTotals & { methode: string; route: string; max_ms: number }>(
-        `SELECT methode, route, sum(nb)::int AS nb, sum(nb_5xx)::int AS nb_5xx, sum(duree_totale_ms)::bigint AS total_ms,
-                max(duree_max_ms)::int AS max_ms, sum(nb_lt100)::int AS lt100, sum(nb_lt300)::int AS lt300,
-                sum(nb_lt1000)::int AS lt1000, sum(nb_lt3000)::int AS lt3000
-           FROM t_request_metrics WHERE minute >= ${DAY_START}
-          GROUP BY methode, route ORDER BY sum(duree_totale_ms) DESC LIMIT 10`,
-      ),
-      this.db.select<ConnectedUserDto>(
-        `SELECT a.nigend, u.grade, u.nom, u.prenom, u.libelle_profil, u.libelle_region,
-                to_char(a.derniere_activite AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS derniere_activite,
-                a.derniere_route, CASE WHEN a.jour = (now() AT TIME ZONE 'Europe/Paris')::date THEN a.nb_requetes_jour ELSE 0 END AS nb_requetes_jour
-           FROM t_user_activity a LEFT JOIN v_user_detail u ON u.nigend = a.nigend
-          WHERE a.derniere_activite >= now() - make_interval(mins => :w)
-          ORDER BY a.derniere_activite DESC LIMIT 100`,
-        { w: windowMin },
-      ),
-      this.db.one<{ nb: number; connectes: number }>(
-        `SELECT count(*) FILTER (WHERE jour = (now() AT TIME ZONE 'Europe/Paris')::date)::int AS nb,
-                count(*) FILTER (WHERE derniere_activite >= now() - make_interval(mins => :w))::int AS connectes
-           FROM t_user_activity`,
-        { w: windowMin },
-      ),
-      this.db.select<AppLogDto>(`SELECT ${LOG_COLUMNS} FROM t_app_logs WHERE niveau IN ('fatal','error') ORDER BY id_log DESC LIMIT 10`),
-      this.db.one<{ crees: number; modifies: number; comptes: number; fiches_ouvertes: number; fiches_jour: number }>(
-        `SELECT (SELECT count(*) FROM planning WHERE created_at >= ${DAY_START})::int AS crees,
-                (SELECT count(*) FROM planning WHERE updated_at >= ${DAY_START} AND created_at < ${DAY_START})::int AS modifies,
-                (SELECT count(*) FROM ref_user WHERE NOT bool_user_inactif)::int AS comptes,
-                (SELECT count(*) FROM t_formulaire WHERE NOT is_closed)::int AS fiches_ouvertes,
-                (SELECT count(*) FROM t_formulaire WHERE created_at >= ${DAY_START})::int AS fiches_jour`,
-      ),
-      this.db.select<{ libelle: string; nb: number }>(
-        `SELECT p.libelle, count(u.id_user)::int AS nb FROM ref_profil p
-           LEFT JOIN ref_user u ON u.id_profil = p.id_profil AND NOT u.bool_user_inactif
-           LEFT JOIN t_profil_classement c ON c.id_profil = p.id_profil
-          GROUP BY p.id_profil, p.libelle, c.classement ORDER BY COALESCE(c.classement, 99)`,
-      ),
-      this.db.one<{ nom: string; taille: number; connexions: number; version: string; migration: string | null }>(
-        `SELECT current_database() AS nom, (pg_database_size(current_database()) / 1048576.0)::numeric(12,1)::float AS taille,
-                (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND application_name LIKE 'rni-api%')::int AS connexions,
-                split_part(current_setting('server_version'), ' ', 1) AS version,
-                (SELECT max(version) FROM t_schema_migrations) AS migration`,
-      ),
-      this.db.one<{ lignes: number; plus_ancien: string | null }>(
-        `SELECT (SELECT reltuples::bigint FROM pg_class WHERE relname = 't_app_logs')::int AS lignes,
-                (SELECT to_char(min(horodatage) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM t_app_logs) AS plus_ancien`,
-      ),
-    ]);
+    const [day, hour, last5, levels, hourRows, routeRows, activity, todayUsers, connectes, lastErrors, metier, profils, dbStats, version, migration, oldest] =
+      await Promise.all([
+        totals(dayStart),
+        totals(new Date(now.getTime() - 3_600_000)),
+        totals(new Date(Math.floor(now.getTime() / 60_000) * 60_000 - 5 * 60_000)),
+        AppLog.findAll({
+          attributes: ['niveau', [fn('count', col('id_log')), 'nb']],
+          where: { horodatage: { [Op.gte]: dayStart }, niveau: { [Op.in]: ['fatal', 'error', 'warn'] } },
+          group: ['niveau'],
+          raw: true,
+        }) as unknown as Promise<{ niveau: string; nb: string }[]>,
+        RequestMetric.findAll({
+          attributes: [[fn('date_trunc', 'hour', col('minute')), 'heure'], ...SUMS, [fn('max', col('duree_max_ms')), 'max_ms']],
+          where: { minute: { [Op.gte]: firstHour } },
+          group: [fn('date_trunc', 'hour', col('minute'))],
+          raw: true,
+        }) as unknown as Promise<Record<string, unknown>[]>,
+        RequestMetric.findAll({
+          attributes: ['methode', 'route', ...SUMS, [fn('max', col('duree_max_ms')), 'max_ms']],
+          where: { minute: { [Op.gte]: dayStart } },
+          group: ['methode', 'route'],
+          order: [[fn('sum', col('duree_totale_ms')), 'DESC']],
+          limit: 10,
+          raw: true,
+        }) as unknown as Promise<Record<string, unknown>[]>,
+        UserActivity.findAll({ where: { derniere_activite: { [Op.gte]: activeSince } }, order: [['derniere_activite', 'DESC']], limit: 100, raw: true }),
+        UserActivity.count({ where: { jour: today } }),
+        UserActivity.count({ where: { derniere_activite: { [Op.gte]: activeSince } } }),
+        AppLog.findAll({ where: { niveau: { [Op.in]: ['fatal', 'error'] } }, order: [['id_log', 'DESC']], limit: 10 }),
+        Promise.all([
+          Planning.count({ where: { created_at: { [Op.gte]: dayStart } } }),
+          Planning.count({ where: { updated_at: { [Op.gte]: dayStart }, created_at: { [Op.lt]: dayStart } } }),
+          RefUser.count({ where: { bool_user_inactif: false } }),
+          Formulaire.count({ where: { is_closed: false } }),
+          Formulaire.count({ where: { created_at: { [Op.gte]: dayStart } } }),
+        ]),
+        Promise.all([
+          RefProfil.findAll({ attributes: ['id_profil', 'libelle'], raw: true }),
+          ProfilClassement.findAll({ raw: true }),
+          RefUser.findAll({ attributes: ['id_profil', [fn('count', col('id_user')), 'nb']], where: { bool_user_inactif: false }, group: ['id_profil'], raw: true }) as unknown as Promise<
+            { id_profil: number; nb: string }[]
+          >,
+        ]),
+        databaseStats(this.db.sequelize),
+        this.db.sequelize.databaseVersion(),
+        SchemaMigration.max<string, SchemaMigration>('version'),
+        AppLog.min<Date, AppLog>('horodatage'),
+      ]);
 
-    const d = day!;
-    const h = hour!;
-    const byLevel = Object.fromEntries(levels.map((l) => [l.niveau, l.nb]));
+    // 24 tranches horaires, les heures sans requête comprises
+    const byHour = new Map(hourRows.map((r) => [new Date(r['heure'] as string).getTime(), r]));
+    const hours = Array.from({ length: 24 }, (_, i) => {
+      const at = firstHour.getTime() + i * 3_600_000;
+      const r = byHour.get(at);
+      const t = totalsOf(r);
+      return { heure: isoS(new Date(at)), nb: t.nb, nb_4xx: t.nb_4xx, nb_5xx: t.nb_5xx, total: t.total_ms, max_ms: int(r?.['max_ms']) };
+    });
+    const routes = routeRows.map((r) => ({ methode: r['methode'] as string, route: r['route'] as string, ...totalsOf(r), max_ms: int(r['max_ms']) }));
+
+    // Identité des utilisateurs actifs
+    const details = activity.length
+      ? await UserDetail.findAll({
+          attributes: ['nigend', 'grade', 'nom', 'prenom', 'libelle_profil', 'libelle_region'],
+          where: { nigend: { [Op.in]: activity.map((a) => a.nigend) } },
+          raw: true,
+        })
+      : [];
+    const who = new Map(details.map((u) => [u.nigend, u]));
+    const connected: ConnectedUserDto[] = activity.map((a) => {
+      const u = who.get(a.nigend);
+      return {
+        nigend: a.nigend,
+        grade: u?.grade ?? null,
+        nom: u?.nom ?? null,
+        prenom: u?.prenom ?? null,
+        libelle_profil: u?.libelle_profil ?? null,
+        libelle_region: u?.libelle_region ?? null,
+        derniere_activite: isoS(a.derniere_activite),
+        derniere_route: a.derniere_route,
+        nb_requetes_jour: a.jour === today ? a.nb_requetes_jour : 0,
+      };
+    });
+
+    const [profilRows, classements, countByProfil] = profils;
+    const rank = new Map(classements.map((c) => [c.id_profil, c.classement]));
+    const counts = new Map(countByProfil.map((c) => [c.id_profil, int(c.nb)]));
+    const comptesParProfil = [...profilRows]
+      .sort((a, b) => (rank.get(a.id_profil) ?? 99) - (rank.get(b.id_profil) ?? 99))
+      .map((p) => ({ libelle: p.libelle, nb: counts.get(p.id_profil) ?? 0 }));
+    const [crees, modifies, comptes, fichesOuvertes, fichesJour] = metier;
+    const base = { nom: this.cfg.db.database, taille: dbStats.taille_mo, connexions: dbStats.connexions_api, version: version.split(' ')[0], migration: migration ?? null };
+    const journal = { lignes: dbStats.lignes_journal, plus_ancien: oldest ? isoS(oldest) : null };
+    const d = day;
+    const h = hour;
+    const byLevel = Object.fromEntries(levels.map((l) => [l.niveau, int(l.nb)]));
     const avg = (t: MetricsTotals) => (t.nb ? Math.round(int(t.total_ms) / t.nb) : null);
     const totalDayMs = int(d.total_ms);
     const stats = this.cache.stats();
@@ -169,10 +231,10 @@ export class DashboardService {
       genere_le: new Date().toISOString(),
       fenetre_connexion_min: windowMin,
       kpis: {
-        connectes: todayUsers?.connectes ?? connected.length,
-        utilisateurs_jour: todayUsers?.nb ?? 0,
+        connectes,
+        utilisateurs_jour: todayUsers,
         requetes_jour: d.nb,
-        requetes_par_minute: Math.round((last5!.nb / 5) * 10) / 10,
+        requetes_par_minute: Math.round((last5.nb / 5) * 10) / 10,
         erreurs_jour: (byLevel['error'] ?? 0) + (byLevel['fatal'] ?? 0),
         erreurs_5xx_jour: d.nb_5xx,
         journal_erreurs_jour: (byLevel['error'] ?? 0) + (byLevel['fatal'] ?? 0),
@@ -204,14 +266,14 @@ export class DashboardService {
         part_temps: totalDayMs ? Math.round((int(r.total_ms) / totalDayMs) * 1000) / 10 : 0,
       })),
       connectes: connected.map((c) => ({ ...c, derniere_route: c.derniere_route?.replace(`/${this.cfg.prefix}`, '') ?? null })),
-      dernieres_erreurs: lastErrors,
+      dernieres_erreurs: lastErrors.map(logDto),
       metier: {
-        plannings_crees_jour: metier?.crees ?? 0,
-        plannings_modifies_jour: metier?.modifies ?? 0,
-        comptes_actifs: metier?.comptes ?? 0,
-        comptes_par_profil: profils.filter((p) => p.nb > 0),
-        fiches_ouvertes: metier?.fiches_ouvertes ?? 0,
-        fiches_creees_jour: metier?.fiches_jour ?? 0,
+        plannings_crees_jour: crees,
+        plannings_modifies_jour: modifies,
+        comptes_actifs: comptes,
+        comptes_par_profil: comptesParProfil.filter((p) => p.nb > 0),
+        fiches_ouvertes: fichesOuvertes,
+        fiches_creees_jour: fichesJour,
       },
       systeme: {
         version: VERSION,
@@ -241,36 +303,33 @@ export class DashboardService {
   /** Journal filtré, du plus récent au plus ancien (pagination par identifiant). */
   async journal(q: AppLogQuery): Promise<AppLogPageDto> {
     const limit = Math.min(Math.max(int(q.limite) || 100, 1), 500);
-    const where: string[] = [];
-    const rep: Record<string, unknown> = { limit: limit + 1 };
+    const where: WhereOptions[] = [];
     if (q.niveau && (LOG_LEVELS as readonly string[]).includes(q.niveau)) {
       // Niveau minimal : ce niveau et les plus graves
-      rep['niveaux'] = LOG_LEVELS.slice(0, LOG_LEVELS.indexOf(q.niveau as AppLogLevel) + 1);
-      where.push('niveau IN (:niveaux)');
+      where.push({ niveau: { [Op.in]: LOG_LEVELS.slice(0, LOG_LEVELS.indexOf(q.niveau as AppLogLevel) + 1) } });
     }
-    if (q.contexte) (where.push('contexte = :contexte'), (rep['contexte'] = q.contexte.slice(0, 80)));
-    if (q.request_id) (where.push('request_id = :rid'), (rep['rid'] = q.request_id.slice(0, 128)));
-    if (q.nigend) (where.push('nigend = :nigend'), (rep['nigend'] = q.nigend.slice(0, 8)));
-    if (q.q?.trim()) {
-      where.push(`message ILIKE :q ESCAPE '\\'`);
-      rep['q'] = `%${q.q.trim().slice(0, 200).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    }
-    if (q.avant != null && int(q.avant) > 0) (where.push('id_log < :avant'), (rep['avant'] = int(q.avant)));
+    if (q.contexte) where.push({ contexte: q.contexte.slice(0, 80) });
+    if (q.request_id) where.push({ request_id: q.request_id.slice(0, 128) });
+    if (q.nigend) where.push({ nigend: q.nigend.slice(0, 8) });
+    if (q.q?.trim()) where.push({ message: { [Op.iLike]: `%${q.q.trim().slice(0, 200).replace(/[\\%_]/g, (c) => `\\${c}`)}%` } });
+    if (q.avant != null && int(q.avant) > 0) where.push({ id_log: { [Op.lt]: int(q.avant) } });
     const [rows, contextes] = await Promise.all([
-      this.db.select<AppLogDto>(
-        `SELECT ${LOG_COLUMNS} FROM t_app_logs ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id_log DESC LIMIT :limit`,
-        rep,
-      ),
-      this.cache.wrap('admin:journal:contextes', 60_000, () =>
-        this.db.select<{ contexte: string; nb: number }>(
-          `SELECT contexte, count(*)::int AS nb FROM t_app_logs
-            WHERE horodatage >= now() - interval '1 day' AND contexte IS NOT NULL
-            GROUP BY contexte ORDER BY count(*) DESC LIMIT 60`,
-        ),
+      AppLog.findAll({ where: { [Op.and]: where }, order: [['id_log', 'DESC']], limit: limit + 1 }),
+      this.cache.wrap('admin:journal:contextes', 60_000, async () =>
+        (
+          (await AppLog.findAll({
+            attributes: ['contexte', [fn('count', col('id_log')), 'nb']],
+            where: { horodatage: { [Op.gte]: new Date(Date.now() - 86_400_000) }, contexte: { [Op.ne]: null } },
+            group: ['contexte'],
+            order: [[fn('count', col('id_log')), 'DESC']],
+            limit: 60,
+            raw: true,
+          })) as unknown as { contexte: string; nb: string }[]
+        ).map((c) => ({ contexte: c.contexte, nb: int(c.nb) })),
       ),
     ]);
     const more = rows.length > limit;
-    const items = more ? rows.slice(0, limit) : rows;
+    const items = (more ? rows.slice(0, limit) : rows).map(logDto);
     return { items, contextes, suivant: more ? items[items.length - 1].id_log : null };
   }
 }

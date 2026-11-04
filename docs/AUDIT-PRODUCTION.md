@@ -205,3 +205,14 @@ Branche : `claude/prod-ready-audit`. Objet : rendre l'application exploitable en
   `rni.log.slow_ms`, migration 2.5.0), appliqué à chaud par tous les processus.
 - Correctif de confidentialité : la trace d'audit d'une modification de compte écrivait les
   valeurs du téléphone personnel et du commentaire. Elle n'écrit plus que le nom des champs.
+
+## 7. Complément : accès aux données par les modèles Sequelize
+
+- Environ 65 requêtes SQL natives réécrites avec les modèles. 18 modèles ajoutés (référentiels,
+  périmètres, supervision, deux vues, historique des migrations) et des associations.
+- Migration 2.8.0 : colonne `recherche` des vues, qui conserve l'usage des index trigrammes.
+- Exceptions limitées à 3 fichiers justifiés (verrous consultatifs et catalogue, migrations,
+  LISTEN / NOTIFY). Le garde-fou `check:sql` bloque toute régression.
+- Mesures sans cache (5 100 personnels, 121 000 plannings) : écart de 0 à +12 % par rapport au
+  SQL natif, après passage des grosses lectures en `raw: true`. Avec le cache (production), les
+  temps sont inchangés.

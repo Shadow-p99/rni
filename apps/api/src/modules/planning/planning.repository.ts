@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PLANNING_PROFILS, PlanningDto } from '@rni/shared';
-import type { Transaction } from 'sequelize';
-import { termParams, userSearchClauses } from '../../common/sql-search.js';
-import { Db } from '../../database/db.service.js';
+import { Op, type Transaction, type WhereOptions } from 'sequelize';
+import { personnelSearchWhere } from '../../common/sql-search.js';
+import { Planning, RefUser, UserDetail } from '../../database/models/index.js';
 
 export interface UserPlanningRow {
   id_user: number;
@@ -42,38 +42,69 @@ export interface PlanningRow extends PlanningDto {
   slot_fin: number;
 }
 
-export const PLANNING_COLUMNS = `
-  p.id_planning, p.id_user, ru.nigend,
-  to_char(p.date_debut, 'YYYY-MM-DD') AS date_debut, p.id_creneaux_debut,
-  to_char(p.date_fin, 'YYYY-MM-DD') AS date_fin, p.id_creneaux_fin,
-  COALESCE(p.id_pos_service, 2) AS id_pos_service,
-  p.adresse_temp, p.x_adresse_temp, p.y_adresse_temp, p.slot_debut, p.slot_fin`;
+const USER_PLANNING_ATTRIBUTES = [
+  'id_user', 'nigend', 'grade', 'abreviation_grade', 'nom', 'prenom', 'id_profil', 'libelle_profil', 'classement', 'poids_grade',
+  'code_unite', 'libelle_unite', 'adresse_unite', 'x_unite', 'y_unite', 'id_departement', 'libelle_departement', 'time_zone',
+  'id_region', 'libelle_region', 'tel_pro', 'tel_perso', 'tel_unite', 'numero_neo_1', 'numero_neo_2', 'commentaire',
+  'geoloc_indicatif', 'geoloc_id_geoloc', 'geoloc_bool_geoloc', 'geoloc_bool_indispo',
+] as const;
 
-const regionClause = (alias: string, regions: number[] | null) => (regions == null ? '' : ` AND ${alias}.id_region IN (:regions)`);
+const PLANNING_ATTRIBUTES = [
+  'id_planning', 'id_user', 'date_debut', 'id_creneaux_debut', 'date_fin', 'id_creneaux_fin', 'id_pos_service',
+  'adresse_temp', 'x_adresse_temp', 'y_adresse_temp', 'slot_debut', 'slot_fin',
+] as const;
 
-/** Requêtes de lecture planning (paramétrées) partagées par les modules planning / région / carte. */
+/** Position par défaut d'une plage sans position (BR-PLA : Indisponible). */
+const DEFAULT_POSITION = 2;
+
+type PlanningWithUser = Omit<Planning, 'user'> & { user?: { nigend: string; id_region: number | null } };
+
+function toRow(p: PlanningWithUser): PlanningRow & { id_region: number | null } {
+  return {
+    id_planning: p.id_planning,
+    id_user: p.id_user,
+    nigend: p.user?.nigend ?? '',
+    date_debut: p.date_debut,
+    id_creneaux_debut: p.id_creneaux_debut,
+    date_fin: p.date_fin,
+    id_creneaux_fin: p.id_creneaux_fin,
+    id_pos_service: p.id_pos_service ?? DEFAULT_POSITION,
+    adresse_temp: p.adresse_temp,
+    x_adresse_temp: p.x_adresse_temp,
+    y_adresse_temp: p.y_adresse_temp,
+    slot_debut: p.slot_debut,
+    slot_fin: p.slot_fin,
+    id_region: p.user?.id_region ?? null,
+  };
+}
+
+/** Lectures planning partagées par les modules planning / région / carte (modèles Sequelize). */
 @Injectable()
 export class PlanningRepository {
-  constructor(private readonly db: Db) {}
-
   /** Personnels portant un planning (profils 3, 4, 7 actifs), dans un périmètre de régions. */
   async planningUsers(regions: number[] | null, extra: { id_user?: number; nigend?: string; terms?: string[] } = {}): Promise<UserPlanningRow[]> {
     if (regions && !regions.length) return [];
     const { terms = [], ...ids } = extra;
-    const search = userSearchClauses('u', terms.length).map((c) => `AND ${c}`).join(' ');
-    return this.db.select<UserPlanningRow>(
-      `SELECT id_user, nigend, grade, abreviation_grade, nom, prenom, id_profil, libelle_profil, classement, poids_grade,
-              code_unite, libelle_unite, adresse_unite, x_unite, y_unite, id_departement, libelle_departement, time_zone,
-              id_region, libelle_region, tel_pro, tel_perso, tel_unite, numero_neo_1, numero_neo_2, commentaire,
-              geoloc_indicatif, geoloc_id_geoloc, geoloc_bool_geoloc, geoloc_bool_indispo
-         FROM v_user_detail u
-        WHERE NOT bool_user_inactif AND id_profil IN (:profils)${regionClause('u', regions)}
-          ${ids.id_user != null ? 'AND id_user = :id_user' : ''}
-          ${ids.nigend != null ? 'AND nigend = :nigend' : ''}
-          ${search}
-        ORDER BY id_departement NULLS LAST, classement, poids_grade DESC, nom, prenom`,
-      { profils: PLANNING_PROFILS, regions, ...ids, ...termParams(terms) },
-    );
+    const where: WhereOptions = {
+      bool_user_inactif: false,
+      id_profil: { [Op.in]: PLANNING_PROFILS },
+      ...(regions ? { id_region: { [Op.in]: regions } } : {}),
+      ...(ids.id_user != null ? { id_user: ids.id_user } : {}),
+      ...(ids.nigend != null ? { nigend: ids.nigend } : {}),
+    };
+    const search = terms.length ? await personnelSearchWhere(terms) : [];
+    return (await UserDetail.findAll({
+      attributes: [...USER_PLANNING_ATTRIBUTES],
+      where: search.length ? { [Op.and]: [where, ...search] } : where,
+      order: [
+        ['id_departement', 'ASC NULLS LAST'],
+        ['classement', 'ASC'],
+        ['poids_grade', 'DESC'],
+        ['nom', 'ASC'],
+        ['prenom', 'ASC'],
+      ],
+      raw: true,
+    })) as unknown as UserPlanningRow[];
   }
 
   /** Plages qui **touchent** la fenêtre de créneaux [start, end] (BR-PLA-2). */
@@ -85,37 +116,70 @@ export class PlanningRepository {
   ): Promise<(PlanningRow & { id_region: number | null })[]> {
     if (regions && !regions.length) return [];
     if (filter.id_users && !filter.id_users.length) return [];
-    return this.db.select(
-      `SELECT ${PLANNING_COLUMNS}, ru.id_region
-         FROM planning p JOIN ref_user ru ON ru.id_user = p.id_user
-        WHERE p.slot_fin >= :start AND p.slot_debut <= :end
-          AND NOT ru.bool_user_inactif AND ru.id_profil IN (:profils)${regionClause('ru', regions)}
-          ${filter.id_pos_service != null ? 'AND COALESCE(p.id_pos_service, 2) = :id_pos_service' : ''}
-          ${filter.nigend != null ? 'AND ru.nigend = :nigend' : ''}
-          ${filter.id_users ? 'AND p.id_user IN (:id_users)' : ''}
-        ORDER BY p.slot_debut`,
-      { start, end, regions, profils: PLANNING_PROFILS, ...filter },
-    );
+    const where: WhereOptions[] = [{ slot_fin: { [Op.gte]: start } }, { slot_debut: { [Op.lte]: end } }];
+    if (filter.id_users) where.push({ id_user: { [Op.in]: filter.id_users } });
+    if (filter.id_pos_service != null) {
+      // Une plage sans position vaut « Indisponible »
+      where.push(
+        filter.id_pos_service === DEFAULT_POSITION
+          ? { [Op.or]: [{ id_pos_service: DEFAULT_POSITION }, { id_pos_service: null }] }
+          : { id_pos_service: filter.id_pos_service },
+      );
+    }
+    const rows = await Planning.findAll({
+      attributes: [...PLANNING_ATTRIBUTES],
+      where: { [Op.and]: where },
+      include: [
+        {
+          model: RefUser,
+          as: 'user',
+          attributes: ['nigend', 'id_region'],
+          required: true,
+          where: {
+            bool_user_inactif: false,
+            id_profil: { [Op.in]: PLANNING_PROFILS },
+            ...(regions ? { id_region: { [Op.in]: regions } } : {}),
+            ...(filter.nigend != null ? { nigend: filter.nigend } : {}),
+          },
+        },
+      ],
+      order: [['slot_debut', 'ASC']],
+      // Objets simples (sans instances Sequelize) : lecture de dizaines de milliers de plages
+      raw: true,
+      nest: true,
+    });
+    return rows.map((r) => toRow(r as unknown as PlanningWithUser));
   }
 
-  async findById(id: number, t?: Transaction, lock = false): Promise<PlanningRow | null> {
-    return this.db.one<PlanningRow>(
-      `SELECT ${PLANNING_COLUMNS} FROM planning p JOIN ref_user ru ON ru.id_user = p.id_user
-        WHERE p.id_planning = :id ${lock ? 'FOR UPDATE OF p' : ''}`,
-      { id },
-      t,
-    );
+  async findById(id: number, transaction?: Transaction, lock = false): Promise<PlanningRow | null> {
+    const row = await Planning.findByPk(id, {
+      attributes: [...PLANNING_ATTRIBUTES],
+      include: [{ model: RefUser, as: 'user', attributes: ['nigend', 'id_region'], required: true }],
+      transaction,
+      ...(lock && transaction ? { lock: { level: transaction.LOCK.UPDATE, of: Planning } } : {}),
+      raw: true,
+      nest: true,
+    });
+    return row ? toRow(row as unknown as PlanningWithUser) : null;
   }
 
   /** BR-PLA-5 : plages du même agent qui recouvrent [start, end] (hors plage exclue). */
-  async overlapping(idUser: number, start: number, end: number, excludeIds: number[] = [], t?: Transaction, lock = false): Promise<PlanningRow[]> {
-    return this.db.select<PlanningRow>(
-      `SELECT ${PLANNING_COLUMNS} FROM planning p JOIN ref_user ru ON ru.id_user = p.id_user
-        WHERE p.id_user = :idUser AND p.slot_debut <= :end AND p.slot_fin >= :start
-          ${excludeIds.length ? 'AND p.id_planning NOT IN (:excludeIds)' : ''}
-        ORDER BY p.slot_debut ${lock ? 'FOR UPDATE OF p' : ''}`,
-      { idUser, start, end, excludeIds },
-      t,
-    );
+  async overlapping(idUser: number, start: number, end: number, excludeIds: number[] = [], transaction?: Transaction, lock = false): Promise<PlanningRow[]> {
+    const rows = await Planning.findAll({
+      attributes: [...PLANNING_ATTRIBUTES],
+      where: {
+        id_user: idUser,
+        slot_debut: { [Op.lte]: end },
+        slot_fin: { [Op.gte]: start },
+        ...(excludeIds.length ? { id_planning: { [Op.notIn]: excludeIds } } : {}),
+      },
+      include: [{ model: RefUser, as: 'user', attributes: ['nigend', 'id_region'], required: true }],
+      order: [['slot_debut', 'ASC']],
+      transaction,
+      ...(lock && transaction ? { lock: { level: transaction.LOCK.UPDATE, of: Planning } } : {}),
+      raw: true,
+      nest: true,
+    });
+    return rows.map((r) => toRow(r as unknown as PlanningWithUser));
   }
 }

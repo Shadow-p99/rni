@@ -24,16 +24,23 @@ import {
   type UserSort,
 } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
-import { searchTerms, termParams, userSearchClauses, wordsClause } from '../../common/sql-search.js';
+import { personnelSearchWhere, searchTerms, wordsWhere } from '../../common/sql-search.js';
+import { Op, type Order, type WhereOptions } from 'sequelize';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService, CacheTag, CacheTtl } from '../../common/cache/cache.service.js';
-import { Db } from '../../database/db.service.js';
-import { RefUser } from '../../database/models/index.js';
+import { PersonnelRpsi, RefUser, UserDetail } from '../../database/models/index.js';
 import { REMOP_CLIENT, type RemopClient } from '../external/external.types.js';
 
-const USER_COLUMNS = `id_user, nigend, grade, abreviation_grade, nom, prenom, code_unite, libelle_unite, id_departement,
-  tel_pro, tel_perso, tel_unite, numero_neo_1, numero_neo_2, id_profil, libelle_profil, id_region, libelle_region, commentaire`;
+const USER_ATTRIBUTES = [
+  'id_user', 'nigend', 'grade', 'abreviation_grade', 'nom', 'prenom', 'code_unite', 'libelle_unite', 'id_departement',
+  'tel_pro', 'tel_perso', 'tel_unite', 'numero_neo_1', 'numero_neo_2', 'id_profil', 'libelle_profil', 'id_region', 'libelle_region', 'commentaire',
+];
+
+const RPSI_ATTRIBUTES = [
+  'nigend', 'nom', 'prenom', 'id_grade_personnel', 'grade', 'code_unite', 'libelle_unite', 'id_region', 'libelle_region',
+  'tel_pro', 'tel_perso', 'tel_unite', 'numero_neo_1', 'numero_neo_2',
+];
 
 interface RpsiRow {
   nigend: string;
@@ -57,7 +64,6 @@ export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
   constructor(
-    private readonly db: Db,
     private readonly adminLog: AdminLogService,
     @InjectModel(RefUser) private readonly users: typeof RefUser,
     @Inject(REMOP_CLIENT) private readonly remop: RemopClient,
@@ -107,25 +113,20 @@ export class UsersService {
     if (query.profil != null && !allowed.includes(query.profil)) return { items: [], total: 0, page, size };
     const profils = query.profil != null ? [query.profil] : allowed;
 
-    const where = ['NOT s.bool_user_inactif', 's.id_profil IN (:profils)'];
-    const params: Record<string, unknown> = { profils, region, limit: size, offset, cap: MAX_COUNTED_ROWS + 1 };
-    if (region != null) where.push('s.id_region = :region');
     const terms = searchTerms(query.q);
-    where.push(...userSearchClauses('s', terms.length));
-    Object.assign(params, termParams(terms));
-    const clause = where.join(' AND ');
+    const base: WhereOptions = { bool_user_inactif: false, id_profil: { [Op.in]: profils }, ...(region != null ? { id_region: region } : {}) };
+    const search = terms.length ? await personnelSearchWhere(terms) : [];
+    const where: WhereOptions = search.length ? { [Op.and]: [base, ...search] } : base;
     const order = orderBy(query.sort, query.dir);
 
-    // Comptage plafonné : coût borné quel que soit le volume.
-    // Le comptage est la partie coûteuse sur gros volume : partagé entre les pages d'une même recherche.
+    // Comptage plafonné (coût borné quel que soit le volume), partagé entre les pages d'une même recherche.
     const countKey = `users:count:${JSON.stringify({ profils, region, terms })}`;
-    const count = await this.cache.wrap(
+    const counted = await this.cache.wrap(
       countKey,
       CacheTtl.PARAM,
-      () => this.db.one<{ total: string }>(`SELECT count(*) AS total FROM (SELECT 1 FROM ${SORT_BASE} WHERE ${clause} LIMIT :cap) c`, params),
+      async () => (await UserDetail.findAll({ attributes: ['id_user'], where, limit: MAX_COUNTED_ROWS + 1, raw: true })).length,
       [CacheTag.USERS],
     );
-    const counted = Number(count?.total ?? 0);
     const capped = counted > MAX_COUNTED_ROWS;
     const total = Math.min(counted, MAX_COUNTED_ROWS);
     this.logger.debug(
@@ -134,12 +135,10 @@ export class UsersService {
     if (offset >= total) return { items: [], total, page, size, capped };
 
     // « Deferred join » : tri / pagination sur les seuls identifiants, puis détail des lignes de la page.
-    const items = await this.db.select<UserDto>(
-      `SELECT ${USER_COLUMNS} FROM v_user_detail s
-         JOIN (SELECT s.id_user FROM ${SORT_BASE} WHERE ${clause} ORDER BY ${order} LIMIT :limit OFFSET :offset) p USING (id_user)
-        ORDER BY ${order}`,
-      params,
-    );
+    const ids = (await UserDetail.findAll({ attributes: ['id_user'], where, order, limit: size, offset, raw: true })).map((r) => r.id_user);
+    const rows = ids.length ? ((await UserDetail.findAll({ attributes: USER_ATTRIBUTES, where: { id_user: { [Op.in]: ids } }, raw: true })) as unknown as UserDto[]) : [];
+    const byId = new Map(rows.map((r) => [r.id_user, r]));
+    const items = ids.map((id) => byId.get(id)).filter((r): r is UserDto => !!r);
     return { items, total, page, size, capped };
   }
 
@@ -147,17 +146,16 @@ export class UsersService {
   async planningCandidates(current: RniUser, q: string): Promise<UserDto[]> {
     const terms = searchTerms(q);
     if (!terms.length) return [];
-    let scope = '';
     this.logger.verbose(`Recherche de personnel planifiable (${current.nigend}) : ${terms.length} mot(s)`);
-    if (current.id_profil === Profil.NEGOCIATEUR) scope = 'AND id_user = :me';
-    else if (!isNationalAdmin(current.id_profil)) scope = 'AND id_region = :region';
-    return this.db.select<UserDto>(
-      `SELECT ${USER_COLUMNS} FROM v_user_detail
-        WHERE NOT bool_user_inactif AND id_profil IN (:profils) ${scope}
-          ${wordsClause("nigend || ' ' || nom || ' ' || prenom || ' ' || coalesce(code_unite, '')", terms.length)}
-        ORDER BY nom, prenom LIMIT 20`,
-      { profils: PLANNING_PROFILS, me: current.id_user, region: current.id_region, ...termParams(terms) },
-    );
+    const scope: WhereOptions =
+      current.id_profil === Profil.NEGOCIATEUR ? { id_user: current.id_user } : !isNationalAdmin(current.id_profil) ? { id_region: current.id_region } : {};
+    return (await UserDetail.findAll({
+      attributes: USER_ATTRIBUTES,
+      where: { [Op.and]: [{ bool_user_inactif: false, id_profil: { [Op.in]: PLANNING_PROFILS }, ...scope }, ...wordsWhere(terms)] },
+      order: [['nom', 'ASC'], ['prenom', 'ASC']],
+      limit: 20,
+      raw: true,
+    })) as unknown as UserDto[];
   }
 
   /** BR-GPU-2 : recherche RPSI (nigend, nom, prénom) pour la création de compte. */
@@ -165,25 +163,28 @@ export class UsersService {
     if ((q ?? '').trim().length < 3) return [];
     const terms = searchTerms(q);
     this.logger.verbose(`Recherche RPSI (${current.nigend}) : ${terms.length} mot(s)`);
-    const scope = isNationalAdmin(current.id_profil) ? '' : 'AND v.id_region = :region';
-    return this.db.select<RpsiPersonnelDto>(
-      `SELECT v.nigend, v.nom, v.prenom, v.grade, v.code_unite, v.libelle_unite, v.id_region, v.libelle_region,
-              ru.id_user, ru.bool_user_inactif
-         FROM v_personnel_to_ref_user v LEFT JOIN ref_user ru ON ru.nigend = v.nigend
-        WHERE TRUE ${wordsClause("v.nigend || ' ' || v.nom || ' ' || v.prenom", terms.length)}
-          ${scope}
-        ORDER BY v.nom, v.prenom LIMIT 20`,
-      { region: current.id_region, ...termParams(terms) },
-    );
+    const scope: WhereOptions = isNationalAdmin(current.id_profil) ? {} : { id_region: current.id_region };
+    const people = await PersonnelRpsi.findAll({
+      attributes: ['nigend', 'nom', 'prenom', 'grade', 'code_unite', 'libelle_unite', 'id_region', 'libelle_region'],
+      where: { [Op.and]: [scope, ...wordsWhere(terms)] },
+      order: [['nom', 'ASC'], ['prenom', 'ASC']],
+      limit: 20,
+      raw: true,
+    });
+    // Compte RNI existant (actif ou non) de chaque candidat
+    const accounts = people.length
+      ? await RefUser.findAll({ attributes: ['nigend', 'id_user', 'bool_user_inactif'], where: { nigend: { [Op.in]: people.map((p) => p.nigend) } }, raw: true })
+      : [];
+    const byNigend = new Map(accounts.map((a) => [a.nigend, a]));
+    return people.map((p) => ({
+      ...(p as unknown as Omit<RpsiPersonnelDto, 'id_user' | 'bool_user_inactif'>),
+      id_user: byNigend.get(p.nigend)?.id_user ?? null,
+      bool_user_inactif: byNigend.get(p.nigend)?.bool_user_inactif ?? null,
+    }));
   }
 
   private async rpsi(nigend: string): Promise<RpsiRow | null> {
-    return this.db.one<RpsiRow>(
-      `SELECT nigend, nom, prenom, id_grade_personnel, grade, code_unite, libelle_unite, id_region, libelle_region,
-              tel_pro, tel_perso, tel_unite, numero_neo_1, numero_neo_2
-         FROM v_personnel_to_ref_user WHERE nigend = :nigend`,
-      { nigend },
-    );
+    return (await PersonnelRpsi.findByPk(nigend, { attributes: RPSI_ATTRIBUTES, raw: true })) as RpsiRow | null;
   }
 
   private assertAssignable(current: RniUser, idProfil: number): void {
@@ -208,7 +209,7 @@ export class UsersService {
   }
 
   async getDetail(id: number): Promise<UserDto> {
-    const u = await this.db.one<UserDto>(`SELECT ${USER_COLUMNS} FROM v_user_detail WHERE id_user = :id AND NOT bool_user_inactif`, { id });
+    const u = (await UserDetail.findOne({ attributes: USER_ATTRIBUTES, where: { id_user: id, bool_user_inactif: false }, raw: true })) as UserDto | null;
     if (!u) throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU);
     return u;
   }
@@ -345,29 +346,21 @@ function pickGeoloc(u: RefUser) {
   };
 }
 
-/** Table de tri étroite : uniquement les colonnes utiles au filtre et au tri (pas de jointures larges). */
-const SORT_BASE = `(SELECT ru.id_user, ru.nigend, ru.nom, ru.prenom, ru.code_unite, ru.id_profil, ru.id_region, ru.bool_user_inactif,
-         COALESCE(pc.classement, 99) AS classement, COALESCE(g.poids, 0) AS poids_grade, r.libelle AS libelle_region
-    FROM ref_user ru
-    LEFT JOIN t_profil_classement pc ON pc.id_profil = ru.id_profil
-    LEFT JOIN ref_grade_personnel g ON g.id_grade_personnel = ru.id_grade_personnel
-    LEFT JOIN ref_regions r ON r.id_region = ru.id_region) s`;
-
-/** Tri sur liste blanche (jamais de nom de colonne issu de la requête) ; `id_user` garantit une pagination stable. */
-export function orderBy(sort: UserSort | undefined, dir: SortDir | undefined): string {
+/** Tri sur liste blanche (jamais de colonne issue de la requête) ; `id_user` garantit une pagination stable. */
+export function orderBy(sort: UserSort | undefined, dir: SortDir | undefined): Order {
   const d = dir === 'desc' ? 'DESC' : 'ASC';
   switch (sort) {
     case 'nom':
-      return `s.nom ${d}, s.prenom ${d}, s.id_user ${d}`;
+      return [['nom', d], ['prenom', d], ['id_user', d]];
     case 'nigend':
-      return `s.nigend ${d}, s.id_user`;
+      return [['nigend', d], ['id_user', 'ASC']];
     case 'unite':
-      return `s.code_unite ${d} NULLS LAST, s.nom, s.prenom, s.id_user`;
+      return [['code_unite', `${d} NULLS LAST`], ['nom', 'ASC'], ['prenom', 'ASC'], ['id_user', 'ASC']];
     case 'region':
-      return `s.libelle_region ${d} NULLS LAST, s.nom, s.prenom, s.id_user`;
+      return [['libelle_region', `${d} NULLS LAST`], ['nom', 'ASC'], ['prenom', 'ASC'], ['id_user', 'ASC']];
     case 'profil':
-      return `s.classement ${d}, s.nom, s.prenom, s.id_user`;
+      return [['classement', d], ['nom', 'ASC'], ['prenom', 'ASC'], ['id_user', 'ASC']];
     default:
-      return 's.classement, s.poids_grade DESC, s.nom, s.prenom, s.id_user';
+      return [['classement', 'ASC'], ['poids_grade', 'DESC'], ['nom', 'ASC'], ['prenom', 'ASC'], ['id_user', 'ASC']];
   }
 }

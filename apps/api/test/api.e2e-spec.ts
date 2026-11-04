@@ -11,7 +11,8 @@ import { createLogger } from '../src/common/runtime/logger.js';
 import { LogPersistService } from '../src/common/supervision/log-persist.service.js';
 import { MetricsService } from '../src/common/supervision/metrics.service.js';
 import { CacheService } from '../src/common/cache/cache.service.js';
-import { Db } from '../src/database/db.service.js';
+import { Op } from 'sequelize';
+import { ParamApp, Planning, RefUser } from '../src/database/models/index.js';
 import { ParamService } from '../src/modules/external/param.service.js';
 
 /** Identités du jeu de données fictif (db/dev/90-seed-dev.sql). */
@@ -309,7 +310,7 @@ describe('API RNI (e2e)', () => {
 
   describe('planning figé : jours glissants (t_param_app)', () => {
     const setJours = async (v: string) => {
-      await app.get(Db).sequelize.query("UPDATE t_param_app SET valeur = :v WHERE cle_param_app = 'rni.planning.jours_glissants'", { replacements: { v } });
+      await ParamApp.update({ valeur: v }, { where: { cle_param_app: 'rni.planning.jours_glissants' } });
       app.get(ParamService).invalidate();
     };
     const past = (n: number) => future(-n);
@@ -317,17 +318,14 @@ describe('API RNI (e2e)', () => {
 
     beforeAll(async () => {
       // Négociateur temporaire d'Île-de-France (sans planning)
-      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999901'`);
-      agent = (await app.get(Db).one<{ id_user: number; nigend: string }>(
-        `INSERT INTO ref_user (nigend, nom, prenom, id_profil, id_region, code_unite)
-         SELECT '999901', 'TEST', 'Figé', 4, id_region, code_unite FROM ref_user WHERE nigend = '${REFERENT_IDF}'
-         RETURNING id_user, nigend`,
-      ))!;
+      await RefUser.destroy({ where: { nigend: '999901' } });
+      const ref = (await RefUser.findOne({ where: { nigend: REFERENT_IDF } }))!;
+      agent = await RefUser.create({ nigend: '999901', nom: 'TEST', prenom: 'Figé', id_profil: 4, id_region: ref.id_region, code_unite: ref.code_unite });
       expect(agent).toBeTruthy();
     });
     afterAll(async () => {
-      await app.get(Db).sequelize.query('DELETE FROM planning WHERE id_user = :id', { replacements: { id: agent.id_user } });
-      await app.get(Db).sequelize.query('DELETE FROM ref_user WHERE id_user = :id', { replacements: { id: agent.id_user } });
+      await Planning.destroy({ where: { id_user: agent.id_user } });
+      await RefUser.destroy({ where: { id_user: agent.id_user } });
       await setJours('30');
     });
 
@@ -350,12 +348,9 @@ describe('API RNI (e2e)', () => {
 
     it('plage commencée dans la partie figée : seule la partie modifiable peut changer', async () => {
       await setJours('3');
-      const [rows] = await app.get(Db).sequelize.query(
-        `INSERT INTO planning (id_user, date_debut, id_creneaux_debut, date_fin, id_creneaux_fin, id_pos_service, created_by, updated_by)
-         VALUES (:id, :d1, 1, :d2, 2, 1, 'test', 'test') RETURNING id_planning`,
-        { replacements: { id: agent.id_user, d1: past(6), d2: future(2) } },
-      );
-      const id = (rows as { id_planning: number }[])[0].id_planning;
+      const { id_planning: id } = await Planning.create({
+        id_user: agent.id_user, date_debut: past(6), id_creneaux_debut: 1, date_fin: future(2), id_creneaux_fin: 2, id_pos_service: 1, created_by: 'test', updated_by: 'test',
+      });
       const put = await as(REFERENT_IDF).put(`/planning/${id}`, { date_debut: past(6), id_creneaux_debut: 1, date_fin: future(2), id_creneaux_fin: 2, id_pos_service: 2 });
       expect(put.body.code).toBe('RNI-1007');
       const del = await as(REFERENT_IDF).del(`/planning/${id}`);
@@ -365,9 +360,7 @@ describe('API RNI (e2e)', () => {
       // La partie à partir d'aujourd'hui reste modifiable
       const clear = await as(REFERENT_IDF).post('/planning/clear', { nigend: agent.nigend, date_debut: future(0), id_creneaux_debut: 1, date_fin: future(2), id_creneaux_fin: 2 });
       expect(clear.body).toEqual({ supprimees: 1, conservees: 1 });
-      const left = await app.get(Db).select<{ date_debut: string; date_fin: string }>(
-        'SELECT date_debut::text, date_fin::text FROM planning WHERE id_user = :id AND date_fin >= :a', { id: agent.id_user, a: past(10) },
-      );
+      const left = await Planning.findAll({ attributes: ['date_debut', 'date_fin'], where: { id_user: agent.id_user, date_fin: { [Op.gte]: past(10) } }, raw: true });
       expect(left).toEqual([{ date_debut: past(6), date_fin: past(1) }]);
     });
 
@@ -512,7 +505,7 @@ describe('API RNI (e2e)', () => {
     });
     it('niveau de journalisation piloté par la base (t_param_app), appliqué à chaud', async () => {
       const set = (k: string, v: string) =>
-        app.get(Db).sequelize.query('UPDATE t_param_app SET valeur = :v WHERE cle_param_app = :k', { replacements: { k, v } });
+        ParamApp.update({ valeur: v }, { where: { cle_param_app: k } });
       const applied = async () => (await as(SUPER_ADMIN).get('/admin/logs')).body.applique;
       expect(await applied()).toMatchObject({ level: 'log', source: 'environnement', sql: false, slow_ms: 1000 });
       expect((await as(GIGN).get('/admin/logs')).status).toBe(403);
@@ -588,9 +581,8 @@ describe('API RNI (e2e)', () => {
       it('réglage temporaire : retour automatique aux valeurs par défaut à l’échéance', async () => {
         await as(SUPER_ADMIN).put('/admin/logs', { ...body, level: 'warn', sql: true, duree_min: 15 });
         // Échéance dépassée (simulée) : chaque processus revient aux défauts et la base est nettoyée
-        await app.get(Db).sequelize.query(`UPDATE t_param_app SET valeur = :v WHERE cle_param_app = 'rni.log.expires_at'`, {
-          replacements: { v: new Date(Date.now() - 1000).toISOString() },
-        });
+        // Sans hooks : seule la notification PostgreSQL (déclencheur) prévient les processus
+        await ParamApp.update({ valeur: new Date(Date.now() - 1000).toISOString() }, { where: { cle_param_app: 'rni.log.expires_at' }, hooks: false });
         await vi.waitFor(
           async () => {
             const d = (await as(SUPER_ADMIN).get('/admin/logs')).body;
@@ -649,18 +641,16 @@ describe('API RNI (e2e)', () => {
     it('le comptage paginé suit les écritures, y compris hors API (notification PostgreSQL)', async () => {
       const total = async () => (await as(GIGN).get('/users?size=1&region=11')).body.total as number;
       const t0 = await total();
-      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
-      await app.get(Db).sequelize.query(
-        `INSERT INTO ref_user (nigend, nom, prenom, id_profil, id_region, code_unite)
-         SELECT '999902', 'TEST', 'Cache', 4, id_region, code_unite FROM ref_user WHERE nigend = '${REFERENT_IDF}'`,
-      );
-      // Écriture hors API (script SQL, import RPSI) : propagée par la notification PostgreSQL
+      await RefUser.destroy({ where: { nigend: '999902' } });
+      const ref = (await RefUser.findOne({ where: { nigend: REFERENT_IDF } }))!;
+      // Écriture hors API (script, import RPSI) : sans hooks Sequelize, seule la notification PostgreSQL la propage
+      await RefUser.create({ nigend: '999902', nom: 'TEST', prenom: 'Cache', id_profil: 4, id_region: ref.id_region, code_unite: ref.code_unite }, { hooks: false });
       await vi.waitFor(async () => expect(await total()).toBe(t0 + 1), { timeout: 3000, interval: 50 });
       expect((await as(SUPER_ADMIN).del('/admin/cache?tag=users')).status).toBe(200);
       const id = (await as(GIGN).get('/users?q=999902')).body.items[0].id_user as number;
       expect((await as(GIGN).del(`/users/${id}`)).status).toBeLessThan(300); // via l'API : immédiat
       expect(await total()).toBe(t0);
-      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
+      await RefUser.destroy({ where: { nigend: '999902' } });
     });
 
     it('invalidation partagée : écoute PostgreSQL active, sans effet de bord', async () => {

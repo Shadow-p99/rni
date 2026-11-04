@@ -293,7 +293,9 @@ SELECT p.nigend,
        p.tel_perso,
        u.tel_unite,
        p.numero_neo_1,
-       p.numero_neo_2
+       p.numero_neo_2,
+       -- Même expression que ix_rpsi_search (index utilisé à travers la vue)
+       (p.nigend || ' ' || p.nom || ' ' || p.prenom) AS recherche
   FROM rpsi_personnel p
   LEFT JOIN ref_grade_personnel g ON g.id_grade_personnel = p.id_grade_personnel
   LEFT JOIN ref_unite u ON u.code_unite = p.code_unite
@@ -314,7 +316,9 @@ SELECT ru.*,
        u.id_departement,
        d.libelle_departement,
        COALESCE(d.dept_time_zone_database, 'Europe/Paris') AS time_zone,
-       r.libelle                          AS libelle_region
+       r.libelle                          AS libelle_region,
+       -- Même expression que ix_ref_user_search (index utilisé à travers la vue)
+       (ru.nigend || ' ' || ru.nom || ' ' || ru.prenom || ' ' || coalesce(ru.code_unite, '')) AS recherche
   FROM ref_user ru
   JOIN ref_profil p ON p.id_profil = ru.id_profil
   LEFT JOIN t_profil_classement pc ON pc.id_profil = ru.id_profil

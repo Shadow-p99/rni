@@ -34,7 +34,7 @@ export class HealthController {
     }
     try {
       await Promise.race([
-        this.db.one('SELECT 1 AS ok'),
+        this.db.sequelize.authenticate({ logging: false }),
         new Promise((_, reject) => setTimeout(() => reject(new Error('délai dépassé')), 2000).unref()),
       ]);
       return { status: 'ready' };

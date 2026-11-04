@@ -49,3 +49,16 @@ describe('créneaux', () => {
     expect(isIsoDate('2026-02-28')).toBe(true);
   });
 });
+
+describe('minuit local', () => {
+  it('heure d’hiver, d’été et jours de changement d’heure (Europe/Paris)', async () => {
+    const { zonedMidnight, startOfLocalDay } = await import('./creneaux.js');
+    expect(zonedMidnight('2026-01-15').toISOString()).toBe('2026-01-14T23:00:00.000Z');
+    expect(zonedMidnight('2026-07-15').toISOString()).toBe('2026-07-14T22:00:00.000Z');
+    expect(zonedMidnight('2026-03-29').toISOString()).toBe('2026-03-28T23:00:00.000Z');
+    expect(zonedMidnight('2026-10-25').toISOString()).toBe('2026-10-24T22:00:00.000Z');
+    expect(zonedMidnight('2026-07-15', 'America/Martinique').toISOString()).toBe('2026-07-15T04:00:00.000Z');
+    expect(startOfLocalDay(new Date('2026-07-15T21:30:00Z')).toISOString()).toBe('2026-07-14T22:00:00.000Z');
+    expect(startOfLocalDay(new Date('2026-07-15T22:30:00Z')).toISOString()).toBe('2026-07-15T22:00:00.000Z');
+  });
+});

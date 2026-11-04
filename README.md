@@ -210,6 +210,39 @@ En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_ap
 
 ---
 
+## Accès aux données : modèles Sequelize
+
+Toutes les lectures et écritures passent par les **modèles Sequelize** (`apps/api/src/database/models`).
+
+| Modèles | Tables / vues |
+|---|---|
+| `RefUser`, `Planning` (→ `user`), `Formulaire` (→ `auteur`), `PerimetreProfil`, `ParamApp`, `AdminMessage`, `AdminLog`, `AdminLogSplunk` | tables métier et paramétrage |
+| `RefProfil`, `ProfilClassement`, `RefPosService`, `RefCreneau`, `RefGrade`, `RefRegion`, `RegionVoisine`, `RegionCenter`, `LienDepartementRegion`, `RefUnite` | référentiels |
+| `AppLog`, `RequestMetric`, `UserActivity`, `SchemaMigration` | supervision |
+| `UserDetail`, `PersonnelRpsi` | vues `v_user_detail`, `v_personnel_to_ref_user` (lecture seule) |
+
+Points notables :
+- **Recherche plein texte.** Les vues exposent une colonne `recherche`, construite avec l'expression
+  exacte des index trigrammes (migration 2.8.0). `Op.iLike` sur cette colonne utilise donc
+  `ix_ref_user_search` et `ix_rpsi_search`, vérifié par `EXPLAIN`.
+- **Colonnes générées** `slot_debut` / `slot_fin` de `Planning` : déclarées dans le modèle, filtrées
+  par `Op.gte` / `Op.lte`, jamais écrites.
+- **Verrous** : `lock: { level: t.LOCK.UPDATE, of: Planning }`.
+- **Compteurs partagés entre workers** : `Model.increment()` (atomique), puis création si la ligne
+  n'existe pas encore.
+- **Grosses lectures** (calendrier, carte) : `raw: true, nest: true`, sans instances Sequelize.
+
+**Exceptions** (sans équivalent dans Sequelize), seules autorisées :
+
+| Fichier | Raison |
+|---|---|
+| `src/database/postgres.ts` | verrou consultatif `pg_try_advisory_xact_lock` ; statistiques du catalogue (`pg_database_size`, `pg_stat_activity`) |
+| `src/database/migrator.ts` | migrations de schéma (DDL), avant le démarrage de l'ORM |
+| `src/common/cache/cache-notify.service.ts` | `LISTEN` / `pg_notify` sur une connexion dédiée |
+
+**Garde-fou.** `pnpm --filter @rni/api check:sql` est lancé au début de `pnpm test`, donc aussi en
+CI. Il échoue si du SQL natif (`query()`, `QueryTypes`, `literal()`, texte SQL) apparaît ailleurs.
+
 ## Listes volumineuses : pagination
 
 `GET /users?page=&size=&q=&region=&profil=&sort=nom|nigend|unite|region|profil&dir=asc|desc` renvoie

@@ -1,8 +1,9 @@
-import { AutoIncrement, Column, CreatedAt, DataType, Model, PrimaryKey, Table, UpdatedAt } from 'sequelize-typescript';
+import { AutoIncrement, BelongsTo, Column, CreatedAt, DataType, ForeignKey, Model, PrimaryKey, Table, UpdatedAt } from 'sequelize-typescript';
+import { RefUser } from './ref-user.model.js';
 
 /**
- * Plage de planning. Les colonnes générées `slot_debut` / `slot_fin` (index de créneau) ne sont
- * volontairement pas déclarées ici : elles sont calculées par PostgreSQL et lues en SQL.
+ * Plage de planning. `slot_debut` / `slot_fin` (index de créneau) sont des colonnes **générées**
+ * par PostgreSQL : lues et filtrées, jamais écrites (exclues des créations / mises à jour).
  */
 @Table({ tableName: 'planning', timestamps: true })
 export class Planning extends Model {
@@ -11,8 +12,12 @@ export class Planning extends Model {
   @Column(DataType.INTEGER)
   id_planning: number;
 
+  @ForeignKey(() => RefUser)
   @Column(DataType.INTEGER)
   id_user: number;
+
+  @BelongsTo(() => RefUser, 'id_user')
+  user?: RefUser;
 
   @Column(DataType.DATEONLY)
   date_debut: string;
@@ -37,6 +42,12 @@ export class Planning extends Model {
 
   @Column(DataType.DOUBLE)
   y_adresse_temp: number | null;
+
+  @Column({ type: DataType.INTEGER, set() {} })
+  slot_debut: number;
+
+  @Column({ type: DataType.INTEGER, set() {} })
+  slot_fin: number;
 
   @Column(DataType.STRING(8))
   created_by: string | null;

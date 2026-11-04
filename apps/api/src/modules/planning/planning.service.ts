@@ -38,7 +38,8 @@ import type { RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { Db } from '../../database/db.service.js';
-import { Planning } from '../../database/models/index.js';
+import { LienDepartementRegion, Planning, RefPosService, RefRegion } from '../../database/models/index.js';
+import { Op } from 'sequelize';
 import { ParamService } from '../external/param.service.js';
 import { GEOLOC_CLIENT, type GeolocClient, type GeolocPosition } from '../external/external.types.js';
 import { PlanningRepository, PlanningRow, UserPlanningRow } from './planning.repository.js';
@@ -79,9 +80,14 @@ export class PlanningService {
       'ref:fuseaux',
       CacheTtl.REFERENTIEL,
       async () =>
-        (await this.db.select<{ tz: string }>('SELECT DISTINCT dept_time_zone_database AS tz FROM lien_departement_region WHERE dept_time_zone_database IS NOT NULL ORDER BY 1'))
-          .map((r) => r.tz)
-          .concat('Europe/Paris'),
+        [
+          ...new Set(
+            (await LienDepartementRegion.findAll({ attributes: ['dept_time_zone_database'], raw: true }))
+              .map((r) => r.dept_time_zone_database)
+              .filter(Boolean)
+              .concat('Europe/Paris'),
+          ),
+        ].sort(),
       [CacheTag.REFERENTIEL],
     );
     return [...new Set(zones.map((z) => currentSlot(now, z)))].join('.');
@@ -113,7 +119,7 @@ export class PlanningService {
     return this.cache.wrap(
       'ref:positions:map',
       CacheTtl.REFERENTIEL,
-      async () => new Map((await this.db.select<PosRow>('SELECT id_pos_service, libelle, color, is_actif FROM ref_pos_service')).map((r) => [r.id_pos_service, r])),
+      async () => new Map((await RefPosService.findAll({ raw: true })).map((r) => [r.id_pos_service, r as PosRow])),
       [CacheTag.REFERENTIEL],
     );
   }
@@ -162,10 +168,7 @@ export class PlanningService {
 
     const [plannings, regionRows] = await Promise.all([
       this.repo.planningsBetween(start, end, regions, filtered ? { id_users: users.map((u) => u.id_user) } : {}),
-      this.db.select<{ id_region: number; libelle: string }>(
-        `SELECT id_region, libelle FROM ref_regions ${regions ? 'WHERE id_region IN (:regions)' : ''} ORDER BY libelle`,
-        { regions },
-      ),
+      RefRegion.findAll({ where: regions ? { id_region: { [Op.in]: regions } } : {}, order: [['libelle', 'ASC']], raw: true }),
     ]);
 
     const byUser = new Map<number, PlanningRow[]>();

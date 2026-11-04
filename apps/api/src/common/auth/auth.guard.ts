@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/commo
 import { Reflector } from '@nestjs/core';
 import { ADMIN_PROFILS, Profil } from '@rni/shared';
 import type { Request } from 'express';
-import { Db } from '../../database/db.service.js';
+import { UserDetail } from '../../database/models/index.js';
 import { BusinessException } from '../business.exception.js';
 import type { RniRequest, RniUser } from './current-user.js';
 import { ALLOW_UNKNOWN_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
@@ -44,7 +44,6 @@ export class AuthGuard implements CanActivate {
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly db: Db,
     private readonly perimetre: PerimetreService,
     private readonly cache: CacheService,
   ) {}
@@ -88,13 +87,15 @@ export class AuthGuard implements CanActivate {
     const row = await this.cache.wrap(
       `auth:${nigend}`,
       CacheTtl.USER,
-      () =>
-        this.db.one<UserRow>(
-          `SELECT id_user, nigend, grade, nom, prenom, id_profil, libelle_profil, id_region, libelle_region,
-                  code_unite, libelle_unite, geoloc_id_geoloc, geoloc_indicatif, geoloc_bool_geoloc, geoloc_bool_indispo
-             FROM v_user_detail WHERE nigend = :nigend AND NOT bool_user_inactif`,
-          { nigend },
-        ),
+      async () =>
+        (await UserDetail.findOne({
+          attributes: [
+            'id_user', 'nigend', 'grade', 'nom', 'prenom', 'id_profil', 'libelle_profil', 'id_region', 'libelle_region',
+            'code_unite', 'libelle_unite', 'geoloc_id_geoloc', 'geoloc_indicatif', 'geoloc_bool_geoloc', 'geoloc_bool_indispo',
+          ],
+          where: { nigend, bool_user_inactif: false },
+          raw: true,
+        })) as UserRow | null,
       [CacheTag.USERS],
     );
     if (!row) return null;

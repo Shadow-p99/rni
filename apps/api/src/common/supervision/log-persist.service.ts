@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
-import { QueryTypes } from 'sequelize';
+import { Op } from 'sequelize';
 import { Db } from '../../database/db.service.js';
+import { AppLog, RequestMetric, UserActivity } from '../../database/models/index.js';
+import { tryAdvisoryXactLock } from '../../database/postgres.js';
 import { ParamService } from '../../modules/external/param.service.js';
 import { CacheService, CacheTag } from '../cache/cache.service.js';
 import { logSink } from '../logging/log-sink.js';
@@ -70,19 +72,9 @@ export class LogPersistService implements OnApplicationBootstrap, OnApplicationS
     }
     if (!rows.length) return;
     for (let i = 0; i < rows.length; i += 500) {
-      const chunk = rows.slice(i, i + 500);
-      const values: unknown[] = [];
-      const tuples = chunk.map((r, j) => {
-        values.push(r.horodatage, r.niveau, r.contexte, r.message, r.pile, r.request_id, r.nigend, r.pid, r.hote);
-        const o = j * 9;
-        return `(${Array.from({ length: 9 }, (_, k) => `$${o + k + 1}`).join(',')})`;
-      });
       try {
         // logging: false — l'écriture du journal ne doit pas produire de journal (pas de boucle)
-        await this.db.sequelize.query(
-          `INSERT INTO t_app_logs (horodatage, niveau, contexte, message, pile, request_id, nigend, pid, hote) VALUES ${tuples.join(',')}`,
-          { bind: values, type: QueryTypes.INSERT, logging: false },
-        );
+        await AppLog.bulkCreate(rows.slice(i, i + 500) as unknown as Record<string, unknown>[], { logging: false, hooks: false, validate: false });
         this.failures = 0;
       } catch (e) {
         logSink.restore(rows.slice(i));
@@ -108,16 +100,13 @@ export class LogPersistService implements OnApplicationBootstrap, OnApplicationS
       const [logs, metrics] = await Promise.all([days('rni.log.retention_days', 14), days('rni.metrics.retention_days', 30)]);
       // Verrou lié à la transaction (même connexion du pool, libéré au commit)
       const counts = await this.db.transaction(async (transaction) => {
-        const [{ locked }] = await this.db.select<{ locked: boolean }>('SELECT pg_try_advisory_xact_lock(:k) AS locked', { k: PURGE_LOCK }, transaction);
-        if (!locked) return null;
-        const run = async (sql: string, d: number) => {
-          const [, meta] = await this.db.sequelize.query(sql, { replacements: { d }, type: QueryTypes.RAW, logging: false, transaction });
-          return (meta as { rowCount?: number } | undefined)?.rowCount ?? 0;
-        };
+        if (!(await tryAdvisoryXactLock(this.db.sequelize, PURGE_LOCK, transaction))) return null;
+        const before = (days: number) => new Date(Date.now() - days * 86_400_000);
+        const opts = { transaction, logging: false } as const;
         return [
-          await run(`DELETE FROM t_app_logs WHERE horodatage < now() - make_interval(days => :d)`, logs),
-          await run(`DELETE FROM t_request_metrics WHERE minute < now() - make_interval(days => :d)`, metrics),
-          await run(`DELETE FROM t_user_activity WHERE derniere_activite < now() - make_interval(days => :d)`, metrics),
+          await AppLog.destroy({ where: { horodatage: { [Op.lt]: before(logs) } }, ...opts }),
+          await RequestMetric.destroy({ where: { minute: { [Op.lt]: before(metrics) } }, ...opts }),
+          await UserActivity.destroy({ where: { derniere_activite: { [Op.lt]: before(metrics) } }, ...opts }),
         ];
       });
       if (counts && counts.some((n) => n > 0)) {

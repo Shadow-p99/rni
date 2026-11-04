@@ -1,5 +1,6 @@
 import { FORMULAIRE_FIELDS } from '@rni/shared';
-import { AutoIncrement, Column, CreatedAt, DataType, Model, PrimaryKey, Table, UpdatedAt } from 'sequelize-typescript';
+import { AutoIncrement, BelongsTo, Column, CreatedAt, DataType, ForeignKey, Model, PrimaryKey, Table, UpdatedAt } from 'sequelize-typescript';
+import { RefUser } from './ref-user.model.js';
 
 /** Fiche de crise. Les 46 colonnes métier sont déclarées à partir du catalogue partagé. */
 @Table({ tableName: 't_formulaire', timestamps: true })
@@ -9,8 +10,12 @@ export class Formulaire extends Model {
   @Column(DataType.INTEGER)
   id_formulaire: number;
 
+  @ForeignKey(() => RefUser)
   @Column(DataType.INTEGER)
   id_user: number;
+
+  @BelongsTo(() => RefUser, 'id_user')
+  auteur?: RefUser;
 
   @Column(DataType.BOOLEAN)
   is_closed: boolean;

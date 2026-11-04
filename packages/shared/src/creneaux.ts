@@ -164,3 +164,36 @@ export function localDateIso(d: Date): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
+
+/** Décalage (ms) du fuseau IANA par rapport à UTC à un instant donné. */
+function zoneOffsetMs(at: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(at));
+  const n = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second')) - Math.floor(at / 1000) * 1000;
+}
+
+/**
+ * Instant du minuit local d'une date `YYYY-MM-DD` dans un fuseau IANA (changements d'heure
+ * pris en compte) : bornes « du jour » des requêtes.
+ */
+export function zonedMidnight(date: string, timeZone = 'Europe/Paris'): Date {
+  const [y, m, d] = date.split('-').map(Number);
+  const guess = Date.UTC(y, m - 1, d);
+  let t = guess - zoneOffsetMs(guess, timeZone);
+  t = guess - zoneOffsetMs(t, timeZone);
+  return new Date(t);
+}
+
+/** Minuit local du jour en cours (Europe/Paris par défaut). */
+export function startOfLocalDay(now = new Date(), timeZone = 'Europe/Paris'): Date {
+  return zonedMidnight(localParts(now, timeZone).date, timeZone);
+}
