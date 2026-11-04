@@ -41,7 +41,7 @@ import { PlanningMobileStore } from './planning-mobile.store';
           }
         </div>
         <rni-async-view [loading]="store.day.loading()" [pending]="store.day.pending()" [error]="store.day.error()" (retry)="store.loadDay()">
-          <rni-day-list [items]="store.dayList()" [canEdit]="canEdit" (select)="open($event)" />
+          <rni-day-list [items]="store.dayList()" [canEdit]="canEdit" (picked)="open($event)" />
         </rni-async-view>
       </div>
     </div>

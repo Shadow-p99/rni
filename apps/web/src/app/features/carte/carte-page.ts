@@ -29,7 +29,7 @@ import { PersonnelCard } from './components/personnel-card';
         [isochrones]="store.isochrones.data()"
         [isoVisible]="store.isoVisible()"
         [placing]="store.placingCrise()"
-        (select)="store.select($event)"
+        (peopleSelect)="store.select($event)"
         (mapClick)="onMapClick($event)"
         (layerFailure)="store.onLayerFailure($event)"
         (renderError)="toasts.error('Affichage impossible', $event)"
@@ -60,10 +60,10 @@ import { PersonnelCard } from './components/personnel-card';
           <div class="card no-print p-3 text-sm shadow-lg" data-html2canvas-ignore>
             @switch (panel()) {
               @case ('filtres') {
-                <rni-filters-panel [value]="store.filters()" (toggle)="store.toggleFilter($event)" (toggleAll)="store.toggleAllFilters()" />
+                <rni-filters-panel [value]="store.filters()" (positionToggle)="store.toggleFilter($event)" (toggleAll)="store.toggleAllFilters()" />
               }
               @case ('fonds') {
-                <rni-layers-panel [layers]="store.baseLayers()" [active]="store.activeLayer()" (select)="store.setLayer($event)" />
+                <rni-layers-panel [layers]="store.baseLayers()" [active]="store.activeLayer()" (layerSelect)="store.setLayer($event)" />
               }
               @case ('crise') {
                 <rni-crise-panel

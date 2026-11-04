@@ -28,7 +28,7 @@ type Dialog = { kind: 'add' } | { kind: 'edit'; user: UserDto } | { kind: 'delet
     @let page = store.list.data();
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-3 p-3 pb-16 desk:p-4 desk:pb-16">
       <rni-page-header title="Gestion du personnel" [subtitle]="(page.total | number) + (page.capped ? '+' : '') + ' compte(s)'">
-        <rni-search-input class="min-w-64 flex-1" label="Recherche" placeholder="Nom, prénom, nigend, code ou libellé d'unité…" [value]="store.q()" (search)="store.search($event)" />
+        <rni-search-input class="min-w-64 flex-1" label="Recherche" placeholder="Nom, prénom, nigend, code ou libellé d'unité…" [value]="store.q()" (searched)="store.search($event)" />
         @if (auth.isGign()) {
           <rni-region-select class="w-56" label="Région" scope="all" [value]="store.region()" (valueChange)="store.setRegion($event)" />
         } @else {

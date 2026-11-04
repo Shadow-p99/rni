@@ -6,7 +6,7 @@ import type { SortDir } from '@rni/shared';
   selector: 'th[rniSortHeader]',
   host: { class: 'px-3 py-2', '[attr.aria-sort]': 'ariaSort()' },
   template: `
-    <button type="button" class="inline-flex items-center gap-1 uppercase hover:text-slate-800" (click)="toggle.emit()">
+    <button type="button" class="inline-flex items-center gap-1 uppercase hover:text-slate-800" (click)="sortToggle.emit()">
       <ng-content />
       <span class="text-[10px]" aria-hidden="true">{{ active() ? (dir() === 'asc' ? '▲' : '▼') : '↕' }}</span>
     </button>
@@ -15,6 +15,6 @@ import type { SortDir } from '@rni/shared';
 export class SortHeader {
   readonly active = input(false);
   readonly dir = input<SortDir>('asc');
-  readonly toggle = output<void>();
+  readonly sortToggle = output<void>();
   protected readonly ariaSort = computed(() => (this.active() ? (this.dir() === 'asc' ? 'ascending' : 'descending') : null));
 }

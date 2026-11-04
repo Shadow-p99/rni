@@ -44,7 +44,7 @@ import { PerimetresStore } from './perimetres.store';
       <rni-error-panel [error]="store.save.error()" />
 
       <rni-async-view class="card" [loading]="store.matrix.loading()" [pending]="store.matrix.pending()" [error]="store.matrix.error()" (retry)="store.load()">
-        <rni-perimetre-matrix [rows]="store.matrix.data()" [value]="value" [changed]="changed" [disabled]="store.save.busy()" (change)="store.set($event.row, $event.module, $event.perimetre)" />
+        <rni-perimetre-matrix [rows]="store.matrix.data()" [value]="value" [changed]="changed" [disabled]="store.save.busy()" (perimetreChange)="store.set($event.row, $event.module, $event.perimetre)" />
       </rni-async-view>
     </div>
   `,

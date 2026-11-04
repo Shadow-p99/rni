@@ -15,7 +15,7 @@ import { CellClick, DayHeader, PlanningGrid } from './planning-grid';
   host: { class: 'card block overflow-hidden' },
   template: `
     @let r = region();
-    <button type="button" class="flex w-full flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-left" (click)="toggle.emit()" [attr.aria-expanded]="r.expanded">
+    <button type="button" class="flex w-full flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-left" (click)="toggled.emit()" [attr.aria-expanded]="r.expanded">
       <span class="text-slate-400" aria-hidden="true">{{ r.expanded ? '▾' : '▸' }}</span>
       <span class="font-semibold">{{ r.libelle }}</span>
       <span class="text-xs text-slate-500">
@@ -52,7 +52,7 @@ export class RegionSection {
   protected readonly ref = inject(ReferentielService);
   readonly region = input.required<RegionView>();
   readonly days = input.required<DayHeader[]>();
-  readonly toggle = output<void>();
+  readonly toggled = output<void>();
   readonly retry = output<void>();
   readonly cellClick = output<CellClick>();
   protected readonly libelle = (id: number) => this.ref.libelle(id);

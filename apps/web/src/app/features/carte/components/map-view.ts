@@ -34,7 +34,7 @@ export class MapViewComponent {
   /** Le prochain clic sur la carte place le point de crise. */
   readonly placing = input(false);
 
-  readonly select = output<PersonnelPointProperties[]>();
+  readonly peopleSelect = output<PersonnelPointProperties[]>();
   readonly mapClick = output<{ lat: number; lng: number }>();
   /** Le fond indiqué ne fournit plus de tuiles. */
   readonly layerFailure = output<string>();
@@ -77,7 +77,7 @@ export class MapViewComponent {
     this.cluster.on('clusterclick', (e: Leaflet.LeafletEvent) => {
       const c = (e as unknown as { layer: Leaflet.MarkerCluster }).layer;
       if (map.getZoom() < 10) c.zoomToBounds({ padding: [40, 40] });
-      else this.select.emit(c.getAllChildMarkers().map((m) => (m as Marker).rni!).filter(Boolean));
+      else this.peopleSelect.emit(c.getAllChildMarkers().map((m) => (m as Marker).rni!).filter(Boolean));
     });
     map.addLayer(this.cluster);
     map.on('click', (e: Leaflet.LeafletMouseEvent) => this.mapClick.emit({ lat: e.latlng.lat, lng: e.latlng.lng }));
@@ -131,7 +131,7 @@ export class MapViewComponent {
       points.map((p) => {
         const m: Marker = L.marker([p.coords[1], p.coords[0]], { icon: personIcon(p), title: `${p.grade ?? ''} ${p.prenom} ${p.nom}`.trim(), keyboard: true });
         m.rni = p;
-        m.on('click', () => this.select.emit([p]));
+        m.on('click', () => this.peopleSelect.emit([p]));
         return m;
       }),
     );

@@ -18,7 +18,7 @@ interface Column {
         <tr>
           @for (c of columns; track c.label) {
             @if (c.sort) {
-              <th rniSortHeader [active]="sort() === c.sort" [dir]="dir()" (toggle)="sortChange.emit(c.sort)">{{ c.label }}</th>
+              <th rniSortHeader [active]="sort() === c.sort" [dir]="dir()" (sortToggle)="sortChange.emit(c.sort)">{{ c.label }}</th>
             } @else {
               <th class="px-3 py-2">{{ c.label }}</th>
             }

@@ -42,7 +42,7 @@ export interface PerimetreChange {
                   [value]="value()(row, m)"
                   [disabled]="row.locked || disabled()"
                   [attr.aria-label]="moduleLabels[m] + ' — ' + row.libelle_profil"
-                  (change)="change.emit({ row, module: m, perimetre: $any($event.target).value })"
+                  (change)="perimetreChange.emit({ row, module: m, perimetre: $any($event.target).value })"
                 >
                   @for (p of perimetres; track p) {
                     <option [value]="p" [selected]="p === value()(row, m)">{{ labels[p] }}</option>
@@ -68,7 +68,7 @@ export class PerimetreMatrix {
   readonly value = input.required<(row: PerimetreProfilDto, m: PerimetreModule) => Perimetre>();
   readonly changed = input<(row: PerimetreProfilDto, m: PerimetreModule) => boolean>(() => false);
   readonly disabled = input(false);
-  readonly change = output<PerimetreChange>();
+  readonly perimetreChange = output<PerimetreChange>();
 
   protected readonly modules = PERIMETRE_MODULES;
   protected readonly moduleLabels = PERIMETRE_MODULE_LIBELLES;

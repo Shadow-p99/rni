@@ -60,7 +60,7 @@ Sans Docker : créer une base `rni` (utilisateur `rni`/`rni`) puis exécuter dan
 |---|---|
 | `pnpm dev` | Développement (shared en watch, API `nest --watch`, `ng serve` avec proxy `/rni/api`) |
 | `pnpm build` | Build de production des trois paquets |
-| `pnpm test` | Tests unitaires (shared, API, client) |
+| `pnpm test` | Tests unitaires (shared, API, client) ; côté client, vérifie d'abord qu'aucune sortie de composant ne porte le nom d'un événement DOM natif (`change`, `search`, `select`…) |
 | `pnpm test:e2e` | Tests d'intégration API contre PostgreSQL (crée la base `rni_e2e`) |
 | `pnpm typecheck` | Vérification de types |
 | `pnpm release` | Artefacts de livraison : `release/api` (API autonome + `node_modules` de prod) et `release/web` |

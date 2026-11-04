@@ -8,7 +8,7 @@ import type { BaseLayerDto } from '@rni/shared';
     <p class="label">Fond cartographique</p>
     @for (l of layers(); track l.id) {
       <label class="flex items-center gap-2 py-1">
-        <input type="radio" name="fond" class="accent-rni-700" [checked]="active() === l.id" (change)="select.emit(l.id)" />
+        <input type="radio" name="fond" class="accent-rni-700" [checked]="active() === l.id" (change)="layerSelect.emit(l.id)" />
         {{ l.label }}
       </label>
     }
@@ -17,5 +17,5 @@ import type { BaseLayerDto } from '@rni/shared';
 export class LayersPanel {
   readonly layers = input.required<BaseLayerDto[]>();
   readonly active = input.required<string>();
-  readonly select = output<string>();
+  readonly layerSelect = output<string>();
 }

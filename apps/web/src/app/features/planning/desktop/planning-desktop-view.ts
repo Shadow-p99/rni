@@ -22,7 +22,7 @@ import { PlanningDesktopStore } from './planning-desktop.store';
     <div class="flex flex-1 flex-col gap-3 p-3 desk:p-4">
       <div class="card no-print flex flex-wrap items-center gap-3 p-2">
         <rni-month-nav [value]="store.month()" (valueChange)="store.setMonth($event)" />
-        <rni-search-input class="w-64" placeholder="Rechercher dans toutes les régions…" [value]="store.search()" (search)="store.setSearch($event)" />
+        <rni-search-input class="w-64" placeholder="Rechercher dans toutes les régions…" [value]="store.search()" (searched)="store.setSearch($event)" />
         <rni-position-filter label="Maintenant :" [withNone]="true" [clearable]="true" [value]="store.positions()" (valueChange)="store.setPositions($event)" />
         <div class="ml-auto flex gap-2">
           <button type="button" class="btn-secondary" (click)="exportPdf()" [disabled]="exporter.busy() || !store.hasData()">{{ exporter.busy() ? 'Export…' : '⤓ PDF' }}</button>
@@ -60,7 +60,7 @@ import { PlanningDesktopStore } from './planning-desktop.store';
             <rni-region-section
               [region]="r"
               [days]="store.dayHeaders()"
-              (toggle)="store.toggleRegion(r.id_region)"
+              (toggled)="store.toggleRegion(r.id_region)"
               (retry)="store.loadRegion(r.id_region)"
               (cellClick)="open($event)"
             />

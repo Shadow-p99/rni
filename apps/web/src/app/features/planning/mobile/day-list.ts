@@ -10,7 +10,7 @@ import { PositionBadge } from '../../../shared/ui/position-badge';
     <ul class="divide-y divide-slate-100">
       @for (p of items(); track p.id_planning) {
         <li>
-          <button type="button" class="flex w-full items-center gap-2 p-3 text-left text-sm" [disabled]="!canEdit()(p)" (click)="select.emit(p)">
+          <button type="button" class="flex w-full items-center gap-2 p-3 text-left text-sm" [disabled]="!canEdit()(p)" (click)="picked.emit(p)">
             <span class="flex-1">
               <span class="font-medium">{{ p.grade }} {{ p.nom }} {{ p.prenom }}</span>
               <span class="block text-xs text-slate-500">{{ p.libelle_unite }}</span>
@@ -30,5 +30,5 @@ import { PositionBadge } from '../../../shared/ui/position-badge';
 export class DayList {
   readonly items = input.required<PlanningDetailDto[]>();
   readonly canEdit = input<(p: PlanningDetailDto) => boolean>(() => false);
-  readonly select = output<PlanningDetailDto>();
+  readonly picked = output<PlanningDetailDto>();
 }
