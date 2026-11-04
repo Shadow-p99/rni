@@ -3,7 +3,7 @@
 #   pnpm db:reset   → recrée la base depuis les scripts
 # Application complète conteneurisée (base + API + client Nginx) :
 #   pnpm docker:up  → http://localhost:8080/rni/  (authentification simulée, services externes simulés)
-#   docker compose --profile tools run --rm migrate   → applique db/migrations sur la base existante
+#   docker compose --profile tools run --rm migrate   → applique db/migrations (historique t_schema_migrations)
 services:
   db:
     image: postgres:16
@@ -40,6 +40,10 @@ services:
       # Démonstration locale : l'authentification simulée n'est autorisée qu'en development.
       # En préproduction / production : NODE_ENV=production, RNI_MOCK_AUTH=false, RNI_MOCK_EXTERNAL=false
       NODE_ENV: development
+      # Primaire + 2 workers : comportement de production (cluster, invalidation partagée du cache)
+      WEB_CONCURRENCY: 2
+      MIGRATE_ON_START: 'true'
+      PROXY_SHARED_SECRET: ${RNI_PROXY_SECRET:-dev-proxy-secret-change-me}
       RNI_MOCK_AUTH: 'true'
       RNI_MOCK_EXTERNAL: 'true'
       MOCK_NIGEND: '100001'
@@ -63,24 +67,24 @@ services:
         condition: service_healthy
     environment:
       API_UPSTREAM: http://api:8096
+      PROXY_SHARED_SECRET: ${RNI_PROXY_SECRET:-dev-proxy-secret-change-me}
     ports:
       - '8080:8080'
 
-  # Migrations idempotentes (base existante) : docker compose --profile tools run --rm migrate
+  # Migrations versionnées (base existante) : docker compose --profile tools run --rm migrate
   migrate:
-    image: postgres:16
+    image: rni-api
     profiles: [tools]
     depends_on:
       db:
         condition: service_healthy
     environment:
-      PGHOST: db
-      PGUSER: rni
-      PGPASSWORD: rni
-      PGDATABASE: rni
-    volumes:
-      - ./apps/api/db/migrations:/migrations:ro
-    entrypoint: ['sh', '-c', 'for f in /migrations/*.sql; do echo "→ $$f"; psql -v ON_ERROR_STOP=1 -q -f "$$f" || exit 1; done']
+      NODE_ENV: development
+      PG_HOST: db
+      PG_USER: rni
+      PG_PASSWORD: rni
+      PG_DATABASE: rni
+    command: ['node', 'dist/migrate.js']
 
 volumes:
   rni-pgdata:

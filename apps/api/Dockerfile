@@ -33,14 +33,20 @@ RUN pnpm --filter @rni/shared build \
 FROM node:${NODE_VERSION} AS runtime
 # Heure locale (créneaux Jour / Nuit, borne « jours glissants ») : Node applique TZ via ICU,
 # sans paquet tzdata.
+# Production : primaire node:cluster + WEB_CONCURRENCY worker(s) (redémarrage progressif sur SIGHUP).
+# Un conteneur = un worker par défaut ; augmenter WEB_CONCURRENCY ou le nombre de réplicas.
 ENV NODE_ENV=production \
     TZ=Europe/Paris \
     APP_PORT=8096 \
-    API_PREFIX=rni/api
+    API_PREFIX=rni/api \
+    WEB_CONCURRENCY=1 \
+    LOG_FORMAT=json
 WORKDIR /app
 COPY --from=build --chown=node:node /out ./
 USER node
 EXPOSE 8096
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${APP_PORT}/${API_PREFIX}/service/alive" >/dev/null || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${APP_PORT}/${API_PREFIX}/health/ready" >/dev/null || exit 1
+STOPSIGNAL SIGTERM
+# Migrations : `docker run … rni-api node dist/migrate.js` (ou MIGRATE_ON_START=true)
 CMD ["node", "--enable-source-maps", "dist/main.js"]

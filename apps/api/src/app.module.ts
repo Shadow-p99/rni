@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule, ValidationPipe } from '@nestjs/
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AuthGuard } from './common/auth/auth.guard.js';
 import { MockHeadersMiddleware } from './common/auth/mock-headers.middleware.js';
+import { RequestContextMiddleware } from './common/http/request-context.middleware.js';
 import { CommonModule } from './common/common.module.js';
 import { HttpExceptionFilter } from './common/http-exception.filter.js';
 import { SplunkInterceptor } from './common/splunk.interceptor.js';
@@ -10,6 +11,7 @@ import { ConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
 import { ExternalModule } from './modules/external/external.module.js';
+import { HealthModule } from './modules/health/health.module.js';
 import { FormulaireModule } from './modules/formulaire/formulaire.module.js';
 import { PlanningModule } from './modules/planning/planning.module.js';
 import { ReferentielModule } from './modules/referentiel/referentiel.module.js';
@@ -30,6 +32,7 @@ import { UsersModule } from './modules/users/users.module.js';
     FormulaireModule,
     ServiceModule,
     AdminModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
@@ -44,6 +47,6 @@ import { UsersModule } from './modules/users/users.module.js';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(MockHeadersMiddleware).forRoutes('*path');
+    consumer.apply(RequestContextMiddleware, MockHeadersMiddleware).forRoutes('*path');
   }
 }

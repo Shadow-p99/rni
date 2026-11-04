@@ -65,7 +65,7 @@ Sans Docker : créer une base `rni` (utilisateur `rni`/`rni`) puis exécuter dan
 | `pnpm typecheck` | Vérification de types |
 | `pnpm release` | Artefacts de livraison : `release/api` (API autonome + `node_modules` de prod) et `release/web` |
 | `pnpm db:up` / `db:reset` / `db:down` | Base de développement Docker |
-| `pnpm db:migrate` | Applique `apps/api/db/migrations/*.sql` (idempotents) sur la base Docker existante |
+| `pnpm db:migrate` / `db:migrate:status` | Applique les migrations versionnées (`apps/api/db/migrations`, historique `t_schema_migrations`) / affiche leur état |
 
 ---
 
@@ -74,7 +74,7 @@ Sans Docker : créer une base `rni` (utilisateur `rni`/`rni`) puis exécuter dan
 ```
 navigateur ──► reverse-proxy SSO (en-têtes nigend, cn, title…) ──► Nginx
                                                                     ├── /rni/       → client Angular (statique)
-                                                                    └── /rni/api/   → pm2 « rni-api » (NestJS :8096)
+                                                                    └── /rni/api/   → systemd « rni-api » : primaire node:cluster + N workers (NestJS :8096)
                                                                                          ├── PostgreSQL (rni)
                                                                                          ├── REMOP  (lignes NEO)
                                                                                          ├── GEOLOC (positions NEO)
@@ -120,7 +120,9 @@ authentifié, 403 non autorisé / hors périmètre, 404 introuvable.
 - `init/02-referentiels.sql` : profils, positions (couleurs), créneaux, grades, régions INSEE et
   voisinages, périmètres initiaux par profil et par module, centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
 - `init/03-param-app.sql` : paramétrage de développement ; `env/param-app.template.sql` pour la prod.
-- `migrations/*.sql` : évolutions idempotentes à appliquer sur une base existante (`pnpm db:migrate`).
+- `migrations/*.sql` : évolutions **versionnées** (`<version>-<libellé>.sql`), appliquées dans l'ordre par
+  `node dist/migrate.js` (chacune dans sa transaction, sous verrou consultatif, historique
+  `t_schema_migrations`) ; scripts idempotents. Lancées par `deploy/install.sh` ou `MIGRATE_ON_START=true`.
 - `dev/90-seed-dev.sql` : **jeu de données fictif** (unités, ~110 personnels RPSI, comptes, plannings
   du mois précédent au mois suivant, fiches d'exemple).
 
@@ -226,8 +228,9 @@ Les autocomplétions (RPSI, personnel du planning) utilisent les mêmes index et
 
 ## Cache applicatif
 
-L'API garde en mémoire les lectures coûteuses (`apps/api/src/common/cache`). Elle tourne en une seule
-instance pm2 (`exec_mode: fork`), donc pas de Redis.
+Chaque processus de l'API garde en mémoire les lectures coûteuses (`apps/api/src/common/cache`). En
+cluster (plusieurs workers, plusieurs serveurs), l'invalidation est **partagée par PostgreSQL** : pas
+de Redis.
 
 | Données | Clé (partagée entre utilisateurs de même périmètre) | Durée | Invalidée par |
 |---|---|---|---|
@@ -241,8 +244,12 @@ instance pm2 (`exec_mode: fork`), donc pas de Redis.
 
 Fonctionnement :
 - **Invalidation automatique.** Des hooks Sequelize sur `planning`, `ref_user` et `t_param_app`
-  invalident à chaque écriture faite par l'API. Dans une transaction, l'invalidation est refaite
-  après le commit. Une lecture en cours pendant une écriture n'est pas conservée.
+  invalident immédiatement dans le processus qui écrit (refait après le commit dans une
+  transaction). Une lecture en cours pendant une écriture n'est pas conservée.
+- **Invalidation partagée (cluster).** Des déclencheurs PostgreSQL (migration 2.4.0) émettent une
+  notification `rni_cache` à chaque écriture validée sur les tables mises en cache, **y compris
+  hors API** (import RPSI, script SQL). Chaque worker écoute (`LISTEN`) et invalide son cache ; si
+  l'écoute est coupée, le cache est vidé à la reconnexion. `CACHE_NOTIFY=false` désactive l'écoute.
 - **Créneau courant dans la clé.** Les compteurs et le filtre « Maintenant » changent d'eux-mêmes
   à 08h et 18h, heure locale de chaque fuseau (métropole et outre-mer).
 - **Chargements concurrents mutualisés.** Cinquante cartes qui se rafraîchissent ensemble ne
@@ -254,8 +261,8 @@ Fonctionnement :
   Une réponse de plus d'un quart du plafond n'est pas conservée. `CACHE_ENABLED=false` désactive le cache.
 - **Exploitation (super administrateur).** `GET /rni/api/admin/cache` donne les statistiques
   (entrées, Mo, taux de succès). `DELETE /rni/api/admin/cache[?tag=planning|users|referentiel|param|external]`
-  vide le cache, par exemple après une modification directe en base ou un import RPSI. Sinon, ces
-  écritures faites hors API sont prises en compte au plus tard à l'expiration indiquée ci-dessus.
+  vide le cache **de tous les processus**. Les écritures faites hors API sont propagées par les
+  notifications PostgreSQL ; les durées ci-dessus restent un filet de sécurité.
 
 Mesures sur 5 100 personnels et 121 000 plannings (médiane, sur la même machine) :
 
@@ -268,8 +275,6 @@ Mesures sur 5 100 personnels et 121 000 plannings (médiane, sur la même machin
 | Carte (`geojson`, national) | 93 ms | 10 ms |
 | 50 cartes rafraîchies simultanément | 1 778 ms | 254 ms |
 
-> Pour passer pm2 en plusieurs instances (`cluster`), il faudra partager l'invalidation, par
-> exemple avec PostgreSQL `LISTEN/NOTIFY` ou Redis. En attendant, garder `instances: 1`.
 
 ## Dette technique du §9 : traitement
 
@@ -318,10 +323,53 @@ Le cahier des charges laisse quelques points ouverts ; voici les choix retenus :
 
 ## Déploiement
 
-Voir [`deploy/PROCEDURE-DEPLOIEMENT.md`](deploy/PROCEDURE-DEPLOIEMENT.md) : pm2 (`rni-api`, Node 22),
-Nginx (`deploy/nginx-rni.conf`), script `deploy/install.sh` (sauvegarde, rsync, redémarrage, test de
-vie). CI : [`.gitlab-ci.yml`](.gitlab-ci.yml) (forge interne, livraison sur tag) et
+Voir [`deploy/PROCEDURE-DEPLOIEMENT.md`](deploy/PROCEDURE-DEPLOIEMENT.md) et le rapport d'audit
+[`docs/AUDIT-PRODUCTION.md`](docs/AUDIT-PRODUCTION.md) : Node.js sous **systemd** (sans pm2),
+cluster `node:cluster`, versions dans `releases/` avec bascule atomique et retour arrière
+automatique, migrations versionnées, Nginx (`deploy/nginx-rni.conf`). CI :
+[`.gitlab-ci.yml`](.gitlab-ci.yml) (forge interne, livraison sur tag) et
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+### Exécution de l'API
+
+`node dist/main.js` est le seul point d'entrée :
+
+| Mode | Quand | Comportement |
+|---|---|---|
+| Processus unique | développement / tests, `WEB_CONCURRENCY=1` | un processus HTTP |
+| Cluster | production (même avec 1 worker) ou `WEB_CONCURRENCY=N\|auto` | primaire + N workers sur le même port |
+
+Signaux : `SIGTERM` / `SIGINT` → arrêt gracieux (`/health/ready` passe à 503, délai
+`SHUTDOWN_DELAY_MS`, fin des requêtes en cours, fermeture du pool, forcé après `SHUTDOWN_TIMEOUT_MS`) ;
+`SIGHUP` → **redémarrage progressif sans interruption** (un worker à la fois, nouvelle version
+désignée par `APP_ROOT`). Un worker qui plante est relancé ; au-delà de 5 plantages par minute le
+primaire s'arrête et laisse systemd décider. Exception ou promesse non gérée : journalisée puis
+arrêt du worker (relancé).
+
+Variables d'environnement (toutes validées au démarrage ; une erreur arrête le processus, code 78) :
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `NODE_ENV` | `local` | `production` / `preprod` : secrets obligatoires, simulations interdites, logs JSON |
+| `APP_HOST` / `APP_PORT` / `API_PREFIX` | `0.0.0.0` / `8096` / `rni/api` | écoute (systemd : `127.0.0.1`) |
+| `PG_HOST` `PG_PORT` `PG_USER` `PG_PASSWORD` `PG_DATABASE` | dév. : `localhost` / `rni` | base (obligatoires hors développement) |
+| `PG_SSL` / `PG_SSL_CA` | `false` / — | TLS vers PostgreSQL, CA en PEM |
+| `PG_POOL_MAX` | `10` | connexions par processus |
+| `PG_STATEMENT_TIMEOUT_MS` | `30000` | durée maximale d'une requête SQL |
+| `WEB_CONCURRENCY` | `1` | workers du cluster (`auto` = nombre de cœurs) |
+| `MIGRATE_ON_START` | `false` | migrations avant le démarrage des workers |
+| `SHUTDOWN_TIMEOUT_MS` / `SHUTDOWN_DELAY_MS` | `25000` / `3000` (prod) | arrêt gracieux |
+| `APP_ROOT` | — | lien de la version courante (relu à chaque redémarrage progressif) |
+| `PROXY_SHARED_SECRET` | — | si défini, seules les requêtes portant `X-RNI-Proxy-Secret` (ajouté par Nginx) sont acceptées |
+| `TRUST_PROXY` | `loopback` | sauts de proxy crus pour `X-Forwarded-For` (journal d'audit) |
+| `CORS_ORIGINS` | dév. : `http://localhost:4200` ; prod : aucune | origines croisées autorisées |
+| `LOG_FORMAT` / `LOG_LEVEL` | prod : `json` / `log` | journalisation sur la sortie standard |
+| `CACHE_ENABLED` `CACHE_NOTIFY` `CACHE_MAX_ENTRIES` `CACHE_MAX_MB` | `true` `true` `5000` `128` | cache applicatif |
+| `RNI_MOCK_AUTH` / `RNI_MOCK_EXTERNAL` | dév. : `true` | simulations (authentification interdite hors dév.) |
+
+Sondes : `GET /rni/api/health/live` (processus) et `/rni/api/health/ready` (base joignable, pas
+d'arrêt en cours). Chaque réponse porte `X-Request-Id` (celui de Nginx, sinon généré), repris dans
+les journaux d'erreur.
 
 ### Conteneurs Docker
 

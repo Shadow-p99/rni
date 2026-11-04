@@ -1,0 +1,57 @@
+# systemd — service « rni-api » (remplace pm2).
+# Installation : deploy/install.sh (copie dans /etc/systemd/system/rni-api.service).
+#   systemctl status rni-api        état
+#   systemctl reload rni-api        redémarrage progressif sans interruption (SIGHUP → workers un à un)
+#   systemctl restart rni-api       redémarrage complet
+#   journalctl -u rni-api -f        journaux (JSON, une ligne par événement)
+[Unit]
+Description=RNI API (Répertoire National des Négociateurs)
+Documentation=file:///srv/nodejs/rni/current/README-EXPLOITATION.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rni
+Group=rni
+WorkingDirectory=/srv/nodejs/rni/current
+# Secrets et réglages (non versionnés) : PG_*, PROXY_SHARED_SECRET, WEB_CONCURRENCY…
+EnvironmentFile=/etc/rni/rni-api.env
+Environment=NODE_ENV=production
+Environment=APP_HOST=127.0.0.1
+# Lien de la version courante : relu à chaque `systemctl reload` (nouvelle version sans interruption)
+Environment=APP_ROOT=/srv/nodejs/rni/current
+Environment=NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-interne.pem
+ExecStart=/usr/bin/node --enable-source-maps dist/main.js
+ExecReload=/bin/kill -HUP $MAINPID
+# Arrêt gracieux : le primaire relaie SIGTERM aux workers (SHUTDOWN_TIMEOUT_MS = 25 s par défaut)
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=40
+Restart=on-failure
+RestartSec=3
+# Configuration invalide (code 78) : inutile de relancer en boucle
+RestartPreventExitStatus=78
+StartLimitIntervalSec=120
+StartLimitBurst=5
+LimitNOFILE=65536
+
+# Durcissement
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+ReadOnlyPaths=/srv/nodejs/rni
+
+[Install]
+WantedBy=multi-user.target

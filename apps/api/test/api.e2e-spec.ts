@@ -1,9 +1,11 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import cookieParser from 'cookie-parser';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
+import { APP_CONFIG, type AppConfig } from '../src/config/configuration.js';
+import { configureApp } from '../src/runtime/server.js';
 import { CacheService } from '../src/common/cache/cache.service.js';
 import { Db } from '../src/database/db.service.js';
 import { ParamService } from '../src/modules/external/param.service.js';
@@ -35,9 +37,9 @@ describe('API RNI (e2e)', () => {
 
   beforeAll(async () => {
     const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = mod.createNestApplication();
-    app.use(cookieParser());
-    app.setGlobalPrefix('rni/api');
+    const nest = mod.createNestApplication<NestExpressApplication>();
+    configureApp(nest, nest.get<AppConfig>(APP_CONFIG));
+    app = nest as unknown as INestApplication<App>;
     await app.init();
   });
 
@@ -478,6 +480,38 @@ describe('API RNI (e2e)', () => {
     });
   });
 
+  describe('exploitation (sondes, en-têtes, corrélation)', () => {
+    it('sondes de vie et de disponibilité, publiques et non journalisées', async () => {
+      const live = await request(app.getHttpServer()).get('/rni/api/health/live').set('Cookie', 'rni_mock_nigend=none');
+      expect(live.status).toBe(200);
+      expect(live.body).toMatchObject({ status: 'ok', pid: process.pid });
+      const ready = await request(app.getHttpServer()).get('/rni/api/health/ready').set('Cookie', 'rni_mock_nigend=none');
+      expect(ready.status).toBe(200);
+      expect(ready.body.status).toBe('ready');
+    });
+    it('identifiant de corrélation et en-têtes de sécurité', async () => {
+      const r = await as(GIGN).get('/users/me').set('X-Request-Id', 'trace-1234-abcd');
+      expect(r.headers['x-request-id']).toBe('trace-1234-abcd');
+      expect(r.headers['x-content-type-options']).toBe('nosniff');
+      expect(r.headers['x-frame-options']).toBe('DENY');
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.headers['x-powered-by']).toBeUndefined();
+      // Identifiant invalide : remplacé
+      const bad = await as(GIGN).get('/users/me').set('X-Request-Id', '<script>');
+      expect(bad.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
+      // Réponses volumineuses mises en cache : revalidation par ETag
+      const tt = await as(GIGN).get(`/planning/timetable?month=${new Date().toISOString().slice(0, 7)}&region=11`);
+      expect(tt.headers['cache-control']).toBe('private, no-cache');
+      expect(tt.headers.etag).toBeTruthy();
+    });
+    it('test de vie mutualisé (pas d’appels externes à chaque requête publique)', async () => {
+      const a = await request(app.getHttpServer()).get('/rni/api/service/testvie');
+      const b = await request(app.getHttpServer()).get('/rni/api/service/testvie');
+      expect(a.status).toBe(200);
+      expect(b.body).toEqual(a.body);
+    });
+  });
+
   describe('cache applicatif', () => {
     const nigends = (tt: { regions: { users: { nigend: string; plannings: { id_planning: number }[] }[] }[] }, nigend: string) =>
       tt.regions.flatMap((r) => r.users).find((u) => u.nigend === nigend)?.plannings.map((p) => p.id_planning) ?? [];
@@ -509,7 +543,7 @@ describe('API RNI (e2e)', () => {
       expect((await as(NEGO_IDF_2).get('/users/me')).body.id_profil).toBe(4);
     });
 
-    it('le comptage paginé suit les créations / suppressions de comptes', async () => {
+    it('le comptage paginé suit les écritures, y compris hors API (notification PostgreSQL)', async () => {
       const total = async () => (await as(GIGN).get('/users?size=1&region=11')).body.total as number;
       const t0 = await total();
       await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
@@ -517,14 +551,19 @@ describe('API RNI (e2e)', () => {
         `INSERT INTO ref_user (nigend, nom, prenom, id_profil, id_region, code_unite)
          SELECT '999902', 'TEST', 'Cache', 4, id_region, code_unite FROM ref_user WHERE nigend = '${REFERENT_IDF}'`,
       );
-      // Écriture hors API : bornée par la durée de vie, ou invalidée par l'exploitation
-      expect(await total()).toBe(t0);
+      // Écriture hors API (script SQL, import RPSI) : propagée par la notification PostgreSQL
+      await vi.waitFor(async () => expect(await total()).toBe(t0 + 1), { timeout: 3000, interval: 50 });
       expect((await as(SUPER_ADMIN).del('/admin/cache?tag=users')).status).toBe(200);
-      expect(await total()).toBe(t0 + 1);
       const id = (await as(GIGN).get('/users?q=999902')).body.items[0].id_user as number;
       expect((await as(GIGN).del(`/users/${id}`)).status).toBeLessThan(300); // via l'API : immédiat
       expect(await total()).toBe(t0);
       await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
+    });
+
+    it('invalidation partagée : écoute PostgreSQL active, sans effet de bord', async () => {
+      const s = (await as(SUPER_ADMIN).get('/admin/cache')).body;
+      expect(s.notify).toMatchObject({ enabled: true, connected: true });
+      expect(s.notify.received).toBeGreaterThan(0);
     });
 
     it('exploitation : statistiques et purge réservées au super administrateur', async () => {

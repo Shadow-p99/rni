@@ -74,7 +74,7 @@ export interface CacheStats {
 }
 
 /**
- * Cache applicatif **en mémoire** de l'API (une instance pm2, `exec_mode: fork`) :
+ * Cache applicatif **en mémoire**, propre à chaque processus (invalidation partagée : CacheNotifyService) :
  * - `wrap(clé, ttl, chargeur, étiquettes)` : lecture ou chargement ; les chargements concurrents
  *   d'une même clé sont mutualisés (une seule requête SQL / un seul appel externe) ;
  * - `invalidate(étiquette)` après chaque écriture ;
@@ -173,7 +173,7 @@ export class CacheService {
     this.bytes = 0;
     this.inflight.clear();
     for (const t of Object.values(CacheTag)) this.generations.set(t, (this.generations.get(t) ?? 0) + 1);
-    this.logger.log('Cache vidé.');
+    this.logger.debug('Cache vidé.');
   }
 
   stats(): CacheStats {

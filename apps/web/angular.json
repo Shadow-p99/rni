@@ -56,7 +56,13 @@
                 }
               ],
               "outputHashing": "all",
-              "baseHref": "/rni/"
+              "baseHref": "/rni/",
+              "optimization": {
+                "scripts": true,
+                "styles": { "minify": true, "inlineCritical": false },
+                "fonts": true
+              },
+              "sourceMap": false
             },
             "development": {
               "optimization": false,

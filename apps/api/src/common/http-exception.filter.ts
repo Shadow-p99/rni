@@ -25,7 +25,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const msg = this.messages.get(code);
     const body: ApiError = { code, message: msg.libelle, type: msg.type, ...(details ? { details } : {}) };
 
-    if (status >= 500) this.logger.error(`${req.method} ${req.originalUrl} → ${code}`, (exception as Error)?.stack);
+    if (status >= 500) this.logger.error(`${req.method} ${req.originalUrl} → ${code} [${(req as { id?: string }).id ?? '-'}]`, (exception as Error)?.stack);
 
     if (status !== HttpStatus.NOT_FOUND || exception instanceof BusinessException) {
       void this.adminLog.business({

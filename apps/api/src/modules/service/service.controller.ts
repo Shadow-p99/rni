@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { NoAudit, Profiles, Public } from '../../common/auth/decorators.js';
 import { BusinessException } from '../../common/business.exception.js';
+import { CacheService } from '../../common/cache/cache.service.js';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
 import { Db } from '../../database/db.service.js';
 import { FACADE_CLIENT, type FacadeClient, GEOLOC_CLIENT, type GeolocClient, REMOP_CLIENT, type RemopClient } from '../external/external.types.js';
@@ -49,6 +50,7 @@ export class ServiceController {
     @Inject(GEOLOC_CLIENT) private readonly geoloc: GeolocClient,
     @Inject(REMOP_CLIENT) private readonly remop: RemopClient,
     @Inject(FACADE_CLIENT) private readonly facade: FacadeClient,
+    private readonly cache: CacheService,
   ) {}
 
   /** Informations API + base (santé). */
@@ -60,7 +62,8 @@ export class ServiceController {
     let permanence: string | null = null;
     try {
       const r = await this.db.one<{ name: string; version: string }>('SELECT current_database() AS name, version() AS version');
-      database = { ok: true, name: r?.name, version: r?.version?.split(' ').slice(0, 2).join(' ') };
+      // Version du serveur PostgreSQL : information utile en recette, masquée en production.
+      database = { ok: true, name: r?.name, ...(this.cfg.isProduction ? {} : { version: r?.version?.split(' ').slice(0, 2).join(' ') }) };
       permanence = await this.params.get('rni.permanence.gign');
     } catch {
       /* base indisponible : renseigné par ok=false */
@@ -101,7 +104,12 @@ export class ServiceController {
   @Get('testvie')
   @Public()
   @NoAudit()
-  async testvie(): Promise<AliveCheckDto[]> {
+  testvie(): Promise<AliveCheckDto[]> {
+    // Route publique qui appelle les services externes : résultat mutualisé 10 s (pas d'amplification).
+    return this.cache.wrap('testvie', 10_000, () => this.runTestvie());
+  }
+
+  private async runTestvie(): Promise<AliveCheckDto[]> {
     const check = async (service: string, fn: () => Promise<unknown>): Promise<AliveCheckDto> => {
       const t = Date.now();
       try {

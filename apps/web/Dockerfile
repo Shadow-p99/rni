@@ -31,7 +31,9 @@ RUN pnpm --filter @rni/shared build \
 # --- Nginx (non root, port 8080) ---------------------------------------------
 FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
 # Adresse de l'API vue depuis le conteneur (modèle Nginx, substitué au démarrage)
-ENV API_UPSTREAM=http://api:8096
+ENV API_UPSTREAM=http://api:8096 \
+    PROXY_SHARED_SECRET= \
+    CSP_EXTRA_SRC=
 COPY apps/web/docker/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /repo/apps/web/dist/web/browser /usr/share/nginx/html/rni
 EXPOSE 8080

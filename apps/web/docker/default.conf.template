@@ -15,15 +15,22 @@ server {
 
     location = / { return 302 /rni/; }
 
+    # CSP : ${CSP_EXTRA_SRC} permet d'autoriser une origine supplémentaire (ex. Matomo)
+    set $rni_csp "default-src 'self'; script-src 'self' ${CSP_EXTRA_SRC}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' ${CSP_EXTRA_SRC}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'";
+
     # API
     location /rni/api/ {
         proxy_pass ${API_UPSTREAM};
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
+        proxy_set_header X-Request-Id $request_id;
+        proxy_set_header X-RNI-Proxy-Secret "${PROXY_SHARED_SECRET}";
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
-        client_max_body_size 2m;
+        client_max_body_size 1m;
+        proxy_next_upstream error timeout http_502;
     }
 
     # Fichiers versionnés (hash dans le nom) : cache long
@@ -36,12 +43,14 @@ server {
     # Application monopage : toute route inconnue renvoie index.html (jamais mis en cache)
     location /rni/ {
         try_files $uri $uri/ /rni/index.html;
+        add_header Content-Security-Policy $rni_csp always;
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options SAMEORIGIN always;
         add_header Referrer-Policy same-origin always;
     }
     location = /rni/index.html {
         add_header Cache-Control "no-store" always;
+        add_header Content-Security-Policy $rni_csp always;
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options SAMEORIGIN always;
         add_header Referrer-Policy same-origin always;

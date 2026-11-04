@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Global, Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { APP_CONFIG, AppConfig } from '../config/configuration.js';
@@ -20,9 +21,19 @@ import { Db } from './db.service.js';
         autoLoadModels: false,
         synchronize: false,
         logging: cfg.db.logging ? console.log : false,
-        // JIT désactivé : sur des requêtes transactionnelles il coûte plus (compilation) qu'il ne rapporte.
-        dialectOptions: { options: '-c jit=off', ...(cfg.db.ssl ? { ssl: { rejectUnauthorized: true } } : {}) },
-        pool: { max: 10, min: 0, idle: 10_000 },
+        dialectOptions: {
+          application_name: 'rni-api',
+          // JIT désactivé : sur des requêtes transactionnelles il coûte plus (compilation) qu'il ne rapporte.
+          options: '-c jit=off',
+          // Aucune requête ne peut monopoliser une connexion indéfiniment.
+          ...(cfg.db.statementTimeoutMs ? { statement_timeout: cfg.db.statementTimeoutMs } : {}),
+          keepAlive: true,
+          ...(cfg.db.ssl ? { ssl: { rejectUnauthorized: true, ...(cfg.db.sslCa ? { ca: readFileSync(cfg.db.sslCa, 'utf8') } : {}) } } : {}),
+        },
+        // Par processus : prévoir PG_POOL_MAX × workers × instances < max_connections de PostgreSQL.
+        pool: { max: cfg.db.poolMax, min: 0, idle: 10_000, acquire: 30_000, evict: 1000 },
+        retryAttempts: 10,
+        retryDelay: 3000,
         define: { underscored: true, freezeTableName: true },
       }),
     }),

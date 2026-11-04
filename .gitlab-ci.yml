@@ -24,6 +24,7 @@ test:
   stage: test
   services: [postgres:16]
   script:
+    - pnpm audit --prod --audit-level high
     - pnpm typecheck
     - pnpm test
     - pnpm test:e2e
