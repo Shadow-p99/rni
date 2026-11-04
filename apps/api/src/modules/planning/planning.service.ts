@@ -32,6 +32,7 @@ import {
 } from '@rni/shared';
 import type { Transaction } from 'sequelize';
 import { AdminLogService } from '../../common/admin-log.service.js';
+import { CacheService, CacheTag, CacheTtl, JsonPayload, regionsKey } from '../../common/cache/cache.service.js';
 import { searchTerms } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
@@ -66,7 +67,25 @@ export class PlanningService {
     @InjectModel(Planning) private readonly plannings: typeof Planning,
     @Inject(GEOLOC_CLIENT) private readonly geoloc: GeolocClient,
     private readonly params: ParamService,
+    private readonly cache: CacheService,
   ) {}
+
+  /**
+   * Créneau courant de chaque fuseau horaire des départements (métropole, outre-mer) : composante
+   * des clés de cache dépendant de l'heure, qui changent donc d'elles-mêmes à 08h / 18h locales.
+   */
+  async slotsKey(now = new Date()): Promise<string> {
+    const zones = await this.cache.wrap(
+      'ref:fuseaux',
+      CacheTtl.REFERENTIEL,
+      async () =>
+        (await this.db.select<{ tz: string }>('SELECT DISTINCT dept_time_zone_database AS tz FROM lien_departement_region WHERE dept_time_zone_database IS NOT NULL ORDER BY 1'))
+          .map((r) => r.tz)
+          .concat('Europe/Paris'),
+      [CacheTag.REFERENTIEL],
+    );
+    return [...new Set(zones.map((z) => currentSlot(now, z)))].join('.');
+  }
 
   /** BR-PLA-3 : contrôle des bornes avec la fenêtre glissante paramétrée (`t_param_app`). */
   private async bounds(p: Partial<PlageBounds>) {
@@ -89,9 +108,13 @@ export class PlanningService {
   // Lecture
   // ---------------------------------------------------------------------------
 
-  async positions(): Promise<Map<number, PosRow>> {
-    const rows = await this.db.select<PosRow>('SELECT id_pos_service, libelle, color, is_actif FROM ref_pos_service');
-    return new Map(rows.map((r) => [r.id_pos_service, r]));
+  positions(): Promise<Map<number, PosRow>> {
+    return this.cache.wrap(
+      'ref:positions:map',
+      CacheTtl.REFERENTIEL,
+      async () => new Map((await this.db.select<PosRow>('SELECT id_pos_service, libelle, color, is_actif FROM ref_pos_service')).map((r) => [r.id_pos_service, r])),
+      [CacheTag.REFERENTIEL],
+    );
   }
 
   /**
@@ -100,7 +123,7 @@ export class PlanningService {
    * périmètre** : seuls les agents correspondants et leurs régions sont renvoyés (au plus
    * MAX_PLANNING_MATCHES agents).
    */
-  async timetable(user: RniUser, month: string, region?: number, filter: TimetableFilter = {}): Promise<TimetableDto> {
+  async timetable(user: RniUser, month: string, region?: number, filter: TimetableFilter = {}): Promise<JsonPayload> {
     let bounds: { first: string; last: string };
     try {
       bounds = monthBounds(month);
@@ -108,10 +131,23 @@ export class PlanningService {
       throw BusinessException.invalid('Mois invalide (AAAA-MM attendu).');
     }
     const regions = this.perimetre.restrict(user, 'planning', region);
+    const terms = searchTerms(filter.q);
+    const positions = filter.positions?.length ? [...new Set(filter.positions)].sort((a, b) => a - b) : null;
+    // Partagé par les utilisateurs de même périmètre ; le filtre « Maintenant » dépend du créneau courant.
+    const key = `tt:${month}:${regionsKey(regions)}:${terms.join(' ')}:${positions?.join(',') ?? ''}:${positions ? await this.slotsKey() : ''}`;
+    return this.cache.wrapJson(key, CacheTtl.PLANNING, () => this.loadTimetable(month, bounds, regions, terms, positions), [CacheTag.PLANNING, CacheTag.USERS]);
+  }
+
+  private async loadTimetable(
+    month: string,
+    bounds: { first: string; last: string },
+    regions: number[] | null,
+    terms: string[],
+    positionList: number[] | null,
+  ): Promise<TimetableDto> {
     const start = toSlot(bounds.first, 1);
     const end = toSlot(bounds.last, 2);
-    const terms = searchTerms(filter.q);
-    const positions = filter.positions?.length ? new Set(filter.positions) : null;
+    const positions = positionList ? new Set(positionList) : null;
     const filtered = terms.length > 0 || positions != null;
 
     let users = await this.repo.planningUsers(regions, { terms });
@@ -175,9 +211,14 @@ export class PlanningService {
   }
 
   /** §5.5 : plannings couvrant une date (Jour ou Nuit), bornés aux profils 3/4/7. */
-  async byDate(user: RniUser, date: string, filter: { region?: number; nigend?: string; id_pos_service?: number }): Promise<PlanningDetailDto[]> {
+  async byDate(user: RniUser, date: string, filter: { region?: number; nigend?: string; id_pos_service?: number }): Promise<JsonPayload> {
     validateDate(date);
     const regions = this.perimetre.restrict(user, 'planning', filter.region);
+    const key = `bydate:${date}:${regionsKey(regions)}:${filter.nigend ?? ''}:${filter.id_pos_service ?? ''}`;
+    return this.cache.wrapJson(key, CacheTtl.PLANNING, () => this.loadByDate(date, regions, filter), [CacheTag.PLANNING, CacheTag.USERS]);
+  }
+
+  private async loadByDate(date: string, regions: number[] | null, filter: { nigend?: string; id_pos_service?: number }): Promise<PlanningDetailDto[]> {
     const start = toSlot(date, 1);
     const [plannings, users] = await Promise.all([
       this.repo.planningsBetween(start, start + 1, regions, { nigend: filter.nigend, id_pos_service: filter.id_pos_service }),
@@ -212,15 +253,24 @@ export class PlanningService {
     for (const u of users) if (!slots.has(u.time_zone)) slots.set(u.time_zone, currentSlot(now, u.time_zone));
     const values = [...slots.values()];
     const plannings = await this.repo.planningsBetween(Math.min(...values), Math.max(...values), regions);
+    // Index par agent : coût linéaire (et non agents × plannings)
+    const byUser = new Map<number, PlanningRow[]>();
+    for (const p of plannings) byUser.set(p.id_user, [...(byUser.get(p.id_user) ?? []), p]);
     return users.map((u) => {
       const cur = slots.get(u.time_zone)!;
-      const planning = plannings.find((p) => p.id_user === u.id_user && p.slot_debut <= cur && p.slot_fin >= cur) ?? null;
+      const planning = byUser.get(u.id_user)?.find((p) => p.slot_debut <= cur && p.slot_fin >= cur) ?? null;
       return { user: u, planning };
     });
   }
 
   /** Carte : `GET /planning/geojson` (§4.2). */
-  async geojson(user: RniUser, now = new Date()): Promise<PersonnelCollection> {
+  async geojson(user: RniUser, now = new Date()): Promise<JsonPayload> {
+    // Rafraîchi par chaque carte ouverte : un seul calcul par périmètre toutes les 15 s au plus.
+    const key = `geo:${regionsKey(user.perimetres.carte)}:${await this.slotsKey(now)}`;
+    return this.cache.wrapJson(key, CacheTtl.LIVE, () => this.loadGeojson(user, now), [CacheTag.PLANNING, CacheTag.USERS]);
+  }
+
+  private async loadGeojson(user: RniUser, now: Date): Promise<PersonnelCollection> {
     const [current, positions, geoloc] = await Promise.all([
       // La carte a son propre périmètre (BR-AUTH-6 paramétrable)
       this.currentPositions(user.perimetres.carte, now),

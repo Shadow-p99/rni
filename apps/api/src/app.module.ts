@@ -5,6 +5,7 @@ import { MockHeadersMiddleware } from './common/auth/mock-headers.middleware.js'
 import { CommonModule } from './common/common.module.js';
 import { HttpExceptionFilter } from './common/http-exception.filter.js';
 import { SplunkInterceptor } from './common/splunk.interceptor.js';
+import { JsonPayloadInterceptor } from './common/cache/json-payload.interceptor.js';
 import { ConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { AdminModule } from './modules/admin/admin.module.js';
@@ -34,6 +35,7 @@ import { UsersModule } from './modules/users/users.module.js';
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: SplunkInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: JsonPayloadInterceptor },
     {
       provide: APP_PIPE,
       useValue: new ValidationPipe({ whitelist: true, transform: true, forbidUnknownValues: false }),

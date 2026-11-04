@@ -2,27 +2,29 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { ErrorCode, PARAM_JOURS_GLISSANTS, parseJoursGlissants } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
+import { CacheService, CacheTag, CacheTtl } from '../../common/cache/cache.service.js';
 import { ParamApp } from '../../database/models/index.js';
 
-/** Configuration applicative en base (`t_param_app`), mise en cache 60 s. */
+/** Configuration applicative en base (`t_param_app`), mise en cache 60 s (étiquette `param`). */
 @Injectable()
 export class ParamService {
-  private cache: Map<string, ParamApp> | null = null;
-  private loadedAt = 0;
+  constructor(
+    @InjectModel(ParamApp) private readonly params: typeof ParamApp,
+    private readonly cache: CacheService,
+  ) {}
 
-  constructor(@InjectModel(ParamApp) private readonly params: typeof ParamApp) {}
-
-  private async all(): Promise<Map<string, ParamApp>> {
-    if (!this.cache || Date.now() - this.loadedAt > 60_000) {
-      const rows = await this.params.findAll({ raw: true });
-      this.cache = new Map(rows.map((r) => [r.cle_param_app, r]));
-      this.loadedAt = Date.now();
-    }
-    return this.cache;
+  private all(): Promise<Map<string, ParamApp>> {
+    return this.cache.wrap(
+      'param:all',
+      CacheTtl.PARAM,
+      async () => new Map((await this.params.findAll({ raw: true })).map((r) => [r.cle_param_app, r])),
+      [CacheTag.PARAM],
+    );
   }
 
+  /** Après une modification directe en base : effet immédiat. */
   invalidate(): void {
-    this.cache = null;
+    this.cache.invalidate(CacheTag.PARAM);
   }
 
   async get(key: string): Promise<string | null> {

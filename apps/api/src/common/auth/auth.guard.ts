@@ -7,6 +7,7 @@ import { BusinessException } from '../business.exception.js';
 import type { RniRequest, RniUser } from './current-user.js';
 import { ALLOW_UNKNOWN_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
 import { PerimetreService } from './perimetre.service.js';
+import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -42,6 +43,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly db: Db,
     private readonly perimetre: PerimetreService,
+    private readonly cache: CacheService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -71,11 +73,18 @@ export class AuthGuard implements CanActivate {
   }
 
   private async loadUser(nigend: string, req: Request): Promise<RniUser | null> {
-    const row = await this.db.one<UserRow>(
-      `SELECT id_user, nigend, grade, nom, prenom, id_profil, libelle_profil, id_region, libelle_region,
-              code_unite, libelle_unite, geoloc_id_geoloc, geoloc_indicatif, geoloc_bool_geoloc, geoloc_bool_indispo
-         FROM v_user_detail WHERE nigend = :nigend AND NOT bool_user_inactif`,
-      { nigend },
+    // Une requête SQL par appel évitée : compte mis en cache 30 s, invalidé à chaque écriture de ref_user.
+    const row = await this.cache.wrap(
+      `auth:${nigend}`,
+      CacheTtl.USER,
+      () =>
+        this.db.one<UserRow>(
+          `SELECT id_user, nigend, grade, nom, prenom, id_profil, libelle_profil, id_region, libelle_region,
+                  code_unite, libelle_unite, geoloc_id_geoloc, geoloc_indicatif, geoloc_bool_geoloc, geoloc_bool_indispo
+             FROM v_user_detail WHERE nigend = :nigend AND NOT bool_user_inactif`,
+          { nigend },
+        ),
+      [CacheTag.USERS],
     );
     if (!row) return null;
     const cn = headerValue(req, 'cn');

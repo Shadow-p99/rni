@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
+import { CacheService } from '../src/common/cache/cache.service.js';
 import { Db } from '../src/database/db.service.js';
 import { ParamService } from '../src/modules/external/param.service.js';
 
@@ -474,6 +475,70 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_IDF).del(`/formulaire/${id}`)).body.code).toBe('RNI-1010');
       expect((await as(NEGO_IDF).del(`/formulaire/${id}`)).status).toBe(204);
       expect((await as(NEGO_IDF).get(`/formulaire/${id}`)).status).toBe(404);
+    });
+  });
+
+  describe('cache applicatif', () => {
+    const nigends = (tt: { regions: { users: { nigend: string; plannings: { id_planning: number }[] }[] }[] }, nigend: string) =>
+      tt.regions.flatMap((r) => r.users).find((u) => u.nigend === nigend)?.plannings.map((p) => p.id_planning) ?? [];
+
+    it('une écriture est visible immédiatement (calendrier, compteurs, carte)', async () => {
+      const d = future(3);
+      const m = d.slice(0, 7);
+      const before = (await as(REFERENT_IDF).get(`/planning/timetable?month=${m}`)).body;
+      await as(REFERENT_IDF).get(`/planning/timetable?month=${m}`); // servi par le cache
+      const cleared = await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF, date_debut: d, id_creneaux_debut: 1, date_fin: d, id_creneaux_fin: 2 });
+      expect(cleared.status).toBe(200);
+      const p = await as(REFERENT_IDF).post('/planning', { nigend: NEGO_IDF, date_debut: d, id_creneaux_debut: 1, date_fin: d, id_creneaux_fin: 2, id_pos_service: 3 });
+      expect(p.status).toBe(201);
+      const after = (await as(REFERENT_IDF).get(`/planning/timetable?month=${m}`)).body;
+      expect(nigends(after, NEGO_IDF)).toContain(p.body.id_planning);
+      expect(nigends(before, NEGO_IDF)).not.toContain(p.body.id_planning);
+      // Même réponse pour un autre utilisateur de même périmètre (entrée partagée)
+      expect(nigends((await as(NEGO_IDF).get(`/planning/timetable?month=${m}`)).body, NEGO_IDF)).toContain(p.body.id_planning);
+      await as(REFERENT_IDF).del(`/planning/${p.body.id_planning}`);
+      expect(nigends((await as(REFERENT_IDF).get(`/planning/timetable?month=${m}`)).body, NEGO_IDF)).not.toContain(p.body.id_planning);
+    });
+
+    it('modification d’un compte : prise en compte immédiate par l’authentification', async () => {
+      const target = (await as(GIGN).get(`/users?q=${NEGO_IDF_2}`)).body.items[0] as { id_user: number; commentaire: string | null };
+      expect((await as(NEGO_IDF_2).get('/users/me')).body.id_profil).toBe(4);
+      expect((await as(GIGN).put(`/users/${target.id_user}`, { id_profil: 7 })).status).toBe(200);
+      expect((await as(NEGO_IDF_2).get('/users/me')).body.id_profil).toBe(7);
+      expect((await as(GIGN).put(`/users/${target.id_user}`, { id_profil: 4 })).status).toBe(200);
+      expect((await as(NEGO_IDF_2).get('/users/me')).body.id_profil).toBe(4);
+    });
+
+    it('le comptage paginé suit les créations / suppressions de comptes', async () => {
+      const total = async () => (await as(GIGN).get('/users?size=1&region=11')).body.total as number;
+      const t0 = await total();
+      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
+      await app.get(Db).sequelize.query(
+        `INSERT INTO ref_user (nigend, nom, prenom, id_profil, id_region, code_unite)
+         SELECT '999902', 'TEST', 'Cache', 4, id_region, code_unite FROM ref_user WHERE nigend = '${REFERENT_IDF}'`,
+      );
+      // Écriture hors API : bornée par la durée de vie, ou invalidée par l'exploitation
+      expect(await total()).toBe(t0);
+      expect((await as(SUPER_ADMIN).del('/admin/cache?tag=users')).status).toBe(200);
+      expect(await total()).toBe(t0 + 1);
+      const id = (await as(GIGN).get('/users?q=999902')).body.items[0].id_user as number;
+      expect((await as(GIGN).del(`/users/${id}`)).status).toBeLessThan(300); // via l'API : immédiat
+      expect(await total()).toBe(t0);
+      await app.get(Db).sequelize.query(`DELETE FROM ref_user WHERE nigend = '999902'`);
+    });
+
+    it('exploitation : statistiques et purge réservées au super administrateur', async () => {
+      await as(GIGN).get('/referentiel/positions');
+      await as(GIGN).get('/referentiel/positions');
+      const s = (await as(SUPER_ADMIN).get('/admin/cache')).body;
+      expect(s).toMatchObject({ enabled: true });
+      expect(s.hits).toBeGreaterThan(0);
+      expect(s.byPrefix.ref).toBeGreaterThan(0);
+      expect((await as(GIGN).get('/admin/cache')).status).toBe(403);
+      expect((await as(SUPER_ADMIN).del('/admin/cache?tag=inconnu')).body.code).toBe('RNI-1002');
+      const cleared = (await as(SUPER_ADMIN).del('/admin/cache')).body;
+      expect(cleared.entries).toBeLessThanOrEqual(1);
+      expect(app.get(CacheService).stats().entries).toBeLessThanOrEqual(2);
     });
   });
 

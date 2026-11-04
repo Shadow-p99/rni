@@ -27,6 +27,7 @@ import { AdminLogService } from '../../common/admin-log.service.js';
 import { searchTerms, termParams, userSearchClauses, wordsClause } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
+import { CacheService, CacheTag, CacheTtl } from '../../common/cache/cache.service.js';
 import { Db } from '../../database/db.service.js';
 import { RefUser } from '../../database/models/index.js';
 import { REMOP_CLIENT, type RemopClient } from '../external/external.types.js';
@@ -58,6 +59,7 @@ export class UsersService {
     private readonly adminLog: AdminLogService,
     @InjectModel(RefUser) private readonly users: typeof RefUser,
     @Inject(REMOP_CLIENT) private readonly remop: RemopClient,
+    private readonly cache: CacheService,
   ) {}
 
   me(u: RniUser): CurrentUserDto {
@@ -113,9 +115,13 @@ export class UsersService {
     const order = orderBy(query.sort, query.dir);
 
     // Comptage plafonné : coût borné quel que soit le volume.
-    const count = await this.db.one<{ total: string }>(
-      `SELECT count(*) AS total FROM (SELECT 1 FROM ${SORT_BASE} WHERE ${clause} LIMIT :cap) c`,
-      params,
+    // Le comptage est la partie coûteuse sur gros volume : partagé entre les pages d'une même recherche.
+    const countKey = `users:count:${JSON.stringify({ profils, region, terms })}`;
+    const count = await this.cache.wrap(
+      countKey,
+      CacheTtl.PARAM,
+      () => this.db.one<{ total: string }>(`SELECT count(*) AS total FROM (SELECT 1 FROM ${SORT_BASE} WHERE ${clause} LIMIT :cap) c`, params),
+      [CacheTag.USERS],
     );
     const counted = Number(count?.total ?? 0);
     const capped = counted > MAX_COUNTED_ROWS;

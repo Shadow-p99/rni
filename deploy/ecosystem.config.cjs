@@ -6,6 +6,7 @@ module.exports = {
       cwd: '/srv/nodejs/rni',
       script: 'dist/main.js',
       node_args: '--enable-source-maps',
+      // 1 seule instance : le cache applicatif est en mémoire (cf. README « Cache applicatif »)
       instances: 1,
       exec_mode: 'fork',
       max_memory_restart: '512M',

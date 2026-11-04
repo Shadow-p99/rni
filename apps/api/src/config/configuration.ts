@@ -19,6 +19,8 @@ export interface AppConfig {
     ssl: boolean;
     logging: boolean;
   };
+  /** Cache applicatif en mémoire (cf. common/cache). */
+  cache: { enabled: boolean; maxEntries: number; maxMb: number };
 }
 
 const bool = (v: string | undefined, def = false) => (v == null || v === '' ? def : ['1', 'true', 'yes', 'on'].includes(v.toLowerCase()));
@@ -42,6 +44,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       database: env.PG_DATABASE ?? 'rni',
       ssl: bool(env.PG_SSL),
       logging: bool(env.PG_LOGGING),
+    },
+    cache: {
+      enabled: bool(env.CACHE_ENABLED, true),
+      maxEntries: Math.max(100, Number(env.CACHE_MAX_ENTRIES ?? 5000) || 5000),
+      maxMb: Math.max(8, Number(env.CACHE_MAX_MB ?? 128) || 128),
     },
   };
   // §8 : l'injection d'un utilisateur factice est interdite hors développement.

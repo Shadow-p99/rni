@@ -3,6 +3,7 @@ import { PerimetreModule, RegionCountsDto, RegionDto, compactToIso, isIsoDate } 
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
+import { CacheService, CacheTag, CacheTtl, JsonPayload, regionsKey } from '../../common/cache/cache.service.js';
 import { Db } from '../../database/db.service.js';
 import { PlanningService } from '../planning/planning.service.js';
 
@@ -26,10 +27,15 @@ export class RegionController {
     private readonly db: Db,
     private readonly perimetre: PerimetreService,
     private readonly planning: PlanningService,
+    private readonly cache: CacheService,
   ) {}
 
   private async regions(ids: number[] | null): Promise<RegionDto[]> {
     if (ids && !ids.length) return [];
+    return this.cache.wrap(`ref:regions:${regionsKey(ids)}`, CacheTtl.REFERENTIEL, () => this.loadRegions(ids), [CacheTag.REFERENTIEL]);
+  }
+
+  private async loadRegions(ids: number[] | null): Promise<RegionDto[]> {
     const rows = await this.db.select<RegionRow>(
       `SELECT r.id_region, r.libelle, c.x, c.y, c.zoom
          FROM ref_regions r LEFT JOIN t_region_center c ON c.id_region = r.id_region
@@ -60,7 +66,14 @@ export class RegionController {
 
   /** Compteurs par région × position de service au créneau courant (ex-v_sum_services). */
   @Get('getNbPositionServiceByRegion')
-  async counts(@CurrentUser() user: RniUser): Promise<RegionCountsDto[]> {
+  async counts(@CurrentUser() user: RniUser): Promise<JsonPayload> {
+    // Partagé par tous les utilisateurs de même périmètre ; la clé change à chaque créneau (08h / 18h).
+    const regionsVisible = user.perimetres.planning;
+    const key = `counts:${regionsKey(regionsVisible)}:${await this.planning.slotsKey()}`;
+    return this.cache.wrapJson(key, CacheTtl.PLANNING, () => this.loadCounts(user), [CacheTag.PLANNING, CacheTag.USERS]);
+  }
+
+  private async loadCounts(user: RniUser): Promise<RegionCountsDto[]> {
     const [regions, current] = await Promise.all([
       this.regions(user.perimetres.planning),
       this.planning.currentPositions(user.perimetres.planning),
@@ -86,6 +99,6 @@ export class RegionController {
     const t = iso(to);
     if (!isIsoDate(f) || !isIsoDate(t) || f > t) throw BusinessException.invalid('Période invalide.');
     const regions = this.perimetre.restrict(user, 'planning', region ? Number(region) : undefined);
-    return this.planning.dailyCounts(regions, f, t);
+    return this.cache.wrapJson(`daily:${regionsKey(regions)}:${f}:${t}`, CacheTtl.PLANNING, () => this.planning.dailyCounts(regions, f, t), [CacheTag.PLANNING, CacheTag.USERS]);
   }
 }

@@ -224,6 +224,53 @@ En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_ap
 Mesuré sur **1 000 000** de comptes : page 1 ≈ 0,2 s, page 5 000 ≈ 0,1–0,5 s, recherche ≈ 0,01–0,2 s.
 Les autocomplétions (RPSI, personnel du planning) utilisent les mêmes index et sont limitées à 20 résultats.
 
+## Cache applicatif
+
+L'API garde en mémoire les lectures coûteuses (`apps/api/src/common/cache`). Elle tourne en une seule
+instance pm2 (`exec_mode: fork`), donc pas de Redis.
+
+| Données | Clé (partagée entre utilisateurs de même périmètre) | Durée | Invalidée par |
+|---|---|---|---|
+| Compte de l'utilisateur connecté (à chaque requête) | nigend | 30 s | écriture `ref_user` |
+| Référentiels, régions, voisinages, fuseaux | — | 1 h | — |
+| Paramètres `t_param_app`, périmètres | — | 60 s | écriture / écran Administration |
+| Calendrier, compteurs par région, compteurs mobiles, restitutions par date | mois / dates, régions, filtre, **créneau courant** | 5 min | écriture `planning` ou `ref_user` |
+| Carte (`geojson`), positions GEOLOC | régions, créneau courant | 15 s | idem |
+| Comptage de la liste paginée du personnel | filtres | 60 s | écriture `ref_user` |
+| Facade (fonds, géocodeur, isochrones), REMOP | adresse / point / nigend | 10 min – 1 h | — |
+
+Fonctionnement :
+- **Invalidation automatique.** Des hooks Sequelize sur `planning`, `ref_user` et `t_param_app`
+  invalident à chaque écriture faite par l'API. Dans une transaction, l'invalidation est refaite
+  après le commit. Une lecture en cours pendant une écriture n'est pas conservée.
+- **Créneau courant dans la clé.** Les compteurs et le filtre « Maintenant » changent d'eux-mêmes
+  à 08h et 18h, heure locale de chaque fuseau (métropole et outre-mer).
+- **Chargements concurrents mutualisés.** Cinquante cartes qui se rafraîchissent ensemble ne
+  déclenchent qu'un seul calcul. Les erreurs ne sont jamais mises en cache.
+- **Réponses volumineuses gardées sérialisées, avec leur ETag.** Pas de nouvelle sérialisation à
+  chaque appel, et un navigateur à jour reçoit `304 Not Modified` sans corps
+  (`Cache-Control: private, no-cache`). Nginx compresse le JSON en gzip.
+- **Taille bornée.** Éviction LRU au-delà de `CACHE_MAX_ENTRIES` (5000) ou `CACHE_MAX_MB` (128 Mo).
+  Une réponse de plus d'un quart du plafond n'est pas conservée. `CACHE_ENABLED=false` désactive le cache.
+- **Exploitation (super administrateur).** `GET /rni/api/admin/cache` donne les statistiques
+  (entrées, Mo, taux de succès). `DELETE /rni/api/admin/cache[?tag=planning|users|referentiel|param|external]`
+  vide le cache, par exemple après une modification directe en base ou un import RPSI. Sinon, ces
+  écritures faites hors API sont prises en compte au plus tard à l'expiration indiquée ci-dessus.
+
+Mesures sur 5 100 personnels et 121 000 plannings (médiane, sur la même machine) :
+
+| Route | Sans cache | Avec cache |
+|---|---|---|
+| Compteurs par région (national) | 83 ms | 2 ms |
+| Calendrier d'une région | 61 ms | 8 ms |
+| Calendrier national (15 Mo) | 434 ms | 40 ms ; revalidation `304` : 25 ms, 0 octet |
+| Calendrier filtré « Maintenant » | 111 ms | 5 ms |
+| Carte (`geojson`, national) | 93 ms | 10 ms |
+| 50 cartes rafraîchies simultanément | 1 778 ms | 254 ms |
+
+> Pour passer pm2 en plusieurs instances (`cluster`), il faudra partager l'invalidation, par
+> exemple avec PostgreSQL `LISTEN/NOTIFY` ou Redis. En attendant, garder `instances: 1`.
+
 ## Dette technique du §9 : traitement
 
 | # | Point | Traitement |

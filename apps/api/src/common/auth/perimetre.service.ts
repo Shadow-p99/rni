@@ -11,11 +11,10 @@ import {
 } from '@rni/shared';
 import { Db } from '../../database/db.service.js';
 import { BusinessException } from '../business.exception.js';
+import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
 import type { RniUser } from './current-user.js';
 
 export type Perimetres = Record<PerimetreModule, number[] | null>;
-
-const CACHE_MS = 30_000;
 
 /**
  * BR-AUTH-6 : périmètre géographique **par profil et par module** (carte, planning), paramétré par
@@ -24,32 +23,37 @@ const CACHE_MS = 30_000;
 @Injectable()
 export class PerimetreService {
   private readonly logger = new Logger(PerimetreService.name);
-  private neighbours: Map<number, number[]> | null = null;
-  private neighboursAt = 0;
-  private config: Map<string, Perimetre> | null = null;
-  private configAt = 0;
+  /** Dernière configuration lue (repli si la base est momentanément illisible). */
+  private lastConfig = new Map<string, Perimetre>();
 
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly cache: CacheService,
+  ) {}
 
   private async loadConfig(): Promise<Map<string, Perimetre>> {
-    if (!this.config || Date.now() - this.configAt > CACHE_MS) {
-      try {
-        const rows = await this.db.select<{ id_profil: number; module: PerimetreModule; perimetre: Perimetre }>(
-          'SELECT id_profil, module, perimetre FROM t_perimetre_profil',
-        );
-        this.config = new Map(rows.map((r) => [`${r.id_profil}:${r.module}`, r.perimetre]));
-        this.configAt = Date.now();
-      } catch (e) {
-        // Paramétrage illisible : valeurs par défaut (jamais d'élargissement involontaire).
-        this.logger.error(`Périmètres indisponibles, valeurs par défaut : ${(e as Error).message}`);
-        return this.config ?? new Map();
-      }
+    try {
+      return await this.cache.wrap(
+        'perimetre:config',
+        CacheTtl.PARAM,
+        async () => {
+          const rows = await this.db.select<{ id_profil: number; module: PerimetreModule; perimetre: Perimetre }>(
+            'SELECT id_profil, module, perimetre FROM t_perimetre_profil',
+          );
+          return (this.lastConfig = new Map(rows.map((r) => [`${r.id_profil}:${r.module}`, r.perimetre])));
+        },
+        [CacheTag.PARAM],
+      );
+    } catch (e) {
+      // Paramétrage illisible : valeurs par défaut (jamais d'élargissement involontaire).
+      this.logger.error(`Périmètres indisponibles, valeurs par défaut : ${(e as Error).message}`);
+      return this.lastConfig;
     }
-    return this.config;
   }
 
+  /** Après modification des périmètres : effet immédiat (comptes et périmètres relus). */
   invalidate(): void {
-    this.config = null;
+    this.cache.invalidate(CacheTag.PARAM, CacheTag.USERS);
   }
 
   async perimetreOf(idProfil: number, module: PerimetreModule): Promise<Perimetre> {
@@ -58,16 +62,20 @@ export class PerimetreService {
   }
 
   async neighboursOf(idRegion: number): Promise<number[]> {
-    if (!this.neighbours || Date.now() - this.neighboursAt > 10 * 60_000) {
-      const rows = await this.db.select<{ id_region: number; id_region_voisine: number }>(
-        'SELECT id_region, id_region_voisine FROM ref_nrb_region_r22',
-      );
-      const map = new Map<number, number[]>();
-      for (const r of rows) map.set(r.id_region, [...(map.get(r.id_region) ?? []), r.id_region_voisine]);
-      this.neighbours = map;
-      this.neighboursAt = Date.now();
-    }
-    return this.neighbours.get(idRegion) ?? [];
+    const neighbours = await this.cache.wrap(
+      'ref:voisins',
+      CacheTtl.REFERENTIEL,
+      async () => {
+        const rows = await this.db.select<{ id_region: number; id_region_voisine: number }>(
+          'SELECT id_region, id_region_voisine FROM ref_nrb_region_r22',
+        );
+        const map = new Map<number, number[]>();
+        for (const r of rows) map.set(r.id_region, [...(map.get(r.id_region) ?? []), r.id_region_voisine]);
+        return map;
+      },
+      [CacheTag.REFERENTIEL],
+    );
+    return neighbours.get(idRegion) ?? [];
   }
 
   private async regionsFor(p: Perimetre, idRegion: number | null): Promise<number[] | null> {
