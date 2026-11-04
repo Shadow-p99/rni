@@ -231,6 +231,16 @@ CREATE TABLE t_param_app (
   is_front      boolean NOT NULL DEFAULT false   -- exposable au client via /service/configuration
 );
 
+-- BR-AUTH-6 : périmètre géographique paramétrable par profil et par module (écran Administration)
+CREATE TABLE t_perimetre_profil (
+  id_profil   integer     NOT NULL REFERENCES ref_profil (id_profil),
+  module      varchar(16) NOT NULL CHECK (module IN ('carte', 'planning')),
+  perimetre   varchar(16) NOT NULL CHECK (perimetre IN ('national', 'region_voisines', 'region')),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  varchar(8),
+  PRIMARY KEY (id_profil, module)
+);
+
 CREATE TABLE t_admin_messages (
   code_message varchar(16) PRIMARY KEY,
   libelle      varchar(512) NOT NULL,

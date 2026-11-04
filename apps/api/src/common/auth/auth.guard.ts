@@ -83,7 +83,7 @@ export class AuthGuard implements CanActivate {
     return {
       ...row,
       displayname: [title, cn].filter(Boolean).join(' ') || `${row.grade ?? ''} ${row.prenom} ${row.nom}`.trim(),
-      regions_visibles: await this.perimetre.visibleRegions(row.id_profil, row.id_region),
+      perimetres: await this.perimetre.visibleRegions(row.id_profil, row.id_region),
     };
   }
 }

@@ -94,7 +94,7 @@ SELECT v.nigend, v.id_grade_personnel, v.grade, v.nom, v.prenom, v.code_unite, v
                ('100002', 2, 'Compte technique de consultation'),
                ('100003', 6, 'Observatrice région AURA'),
                ('100004', 5, NULL),
-               ('100005', 1, NULL)) AS s(nigend, id_profil, commentaire) ON s.nigend = v.nigend;
+               ('100005', 8, 'Super administrateur (paramétrage des périmètres)')) AS s(nigend, id_profil, commentaire) ON s.nigend = v.nigend;
 
 -- Comptes RNI régionaux : 1er de chaque unité = référent (ou référent adjoint une unité sur trois),
 -- les suivants = négociateurs ; une personne sur 8 n'a pas de compte (candidate à la création).

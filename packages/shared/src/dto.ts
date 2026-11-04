@@ -2,6 +2,7 @@
  * Contrats d'échange API ↔ client.
  */
 import type { FormulaireContent } from './formulaire.js';
+import type { Perimetre, PerimetreModule } from './profils.js';
 
 export interface PositionServiceDto {
   id_pos_service: number;
@@ -42,9 +43,12 @@ export interface CurrentUserDto {
   libelle_profil: string;
   id_region: number | null;
   libelle_region: string | null;
-  /** Régions visibles (BR-AUTH-6) ; `null` = national. */
+  /** Régions visibles sur le planning (BR-AUTH-6) ; `null` = national. */
   regions_visibles: number[] | null;
+  /** Régions visibles par module ; `null` = national. */
+  perimetres: Record<PerimetreModule, number[] | null>;
   is_admin: boolean;
+  is_super_admin: boolean;
   geoloc_id_geoloc: string | null;
   geoloc_indicatif: string | null;
   geoloc_bool_geoloc: boolean;
@@ -328,4 +332,20 @@ export interface MockUserDto {
   id_profil: number;
   libelle_profil: string;
   libelle_region: string | null;
+}
+
+/** Ligne de l'écran Administration : périmètre de chaque module pour un profil. */
+export interface PerimetreProfilDto {
+  id_profil: number;
+  libelle_profil: string;
+  carte: Perimetre;
+  planning: Perimetre;
+  /** Non modifiable (super administrateur). */
+  locked: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface PerimetreUpdateDto {
+  items: { id_profil: number; module: PerimetreModule; perimetre: Perimetre }[];
 }

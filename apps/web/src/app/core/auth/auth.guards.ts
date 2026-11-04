@@ -16,6 +16,9 @@ export const isUserGuard: CanActivateFn = async (_route, state) => {
 /** BR-AUTH-5 : page /gestion réservée aux profils 1, 3, 7. */
 export const isAdminGuard: CanActivateFn = () => (inject(AuthService).isAdmin() ? true : inject(Router).parseUrl('/unauthorized'));
 
+/** Administration des périmètres : super administrateur uniquement. */
+export const superAdminGuard: CanActivateFn = () => (inject(AuthService).isSuperAdmin() ? true : inject(Router).parseUrl('/unauthorized'));
+
 /** BR-FOR-1 : profils 2, 5, 6 renvoyés vers /unauthorized. */
 export const formulaireGuard: CanActivateFn = () => (inject(AuthService).canFormulaire() ? true : inject(Router).parseUrl('/unauthorized'));
 

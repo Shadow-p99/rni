@@ -1,7 +1,17 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { AliveCheckDto, AppInfoDto, CreneauDto, PositionServiceDto, ProfilDto, RegionDto } from '@rni/shared';
-import { API, RequestOptions, ctx } from './api.config';
+import type {
+  AliveCheckDto,
+  AppInfoDto,
+  CreneauDto,
+  PerimetreModule,
+  PerimetreProfilDto,
+  PerimetreUpdateDto,
+  PositionServiceDto,
+  ProfilDto,
+  RegionDto,
+} from '@rni/shared';
+import { API, RequestOptions, ctx, toParams } from './api.config';
 
 /** Services techniques et référentiels. */
 @Injectable({ providedIn: 'root' })
@@ -26,8 +36,15 @@ export class ServiceApi {
   profils(opts?: RequestOptions) {
     return this.http.get<ProfilDto[]>(`${API}/referentiel/profils`, ctx(opts));
   }
-  visibleRegions(opts?: RequestOptions) {
-    return this.http.get<RegionDto[]>(`${API}/region`, ctx(opts));
+  /** Régions visibles dans un module (périmètres paramétrables, BR-AUTH-6). */
+  visibleRegions(module: PerimetreModule, opts?: RequestOptions) {
+    return this.http.get<RegionDto[]>(`${API}/region`, { params: toParams({ module }), ...ctx(opts) });
+  }
+  perimetres(opts?: RequestOptions) {
+    return this.http.get<PerimetreProfilDto[]>(`${API}/admin/perimetres`, ctx(opts));
+  }
+  updatePerimetres(dto: PerimetreUpdateDto, opts?: RequestOptions) {
+    return this.http.put<PerimetreProfilDto[]>(`${API}/admin/perimetres`, dto, ctx(opts));
   }
   allRegions(opts?: RequestOptions) {
     return this.http.get<RegionDto[]>(`${API}/region/all`, ctx(opts));

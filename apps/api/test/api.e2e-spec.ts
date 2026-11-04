@@ -14,6 +14,7 @@ const REFERENT_IDF = '200073';
 const NEGO_IDF = '200086';
 const NEGO_IDF_2 = '200087';
 const REFERENT_MARTINIQUE = '200091';
+const SUPER_ADMIN = '100005';
 
 describe('API RNI (e2e)', () => {
   let app: INestApplication<App>;
@@ -66,24 +67,30 @@ describe('API RNI (e2e)', () => {
   });
 
   describe('périmètre géographique (BR-AUTH-6)', () => {
-    it('seul le GIGN voit toutes les régions ; tous les autres profils, leur région seule', async () => {
-      expect((await as(GIGN).get('/users/me')).body.regions_visibles).toBeNull();
-      expect((await as(REFERENT_IDF).get('/users/me')).body.regions_visibles).toEqual([11]);
-      expect((await as(NEGO_IDF).get('/users/me')).body.regions_visibles).toEqual([11]);
-      expect((await as(LECTURE).get('/users/me')).body.regions_visibles).toEqual([11]);
-      expect((await as(OMS).get('/users/me')).body.regions_visibles).toEqual([84]);
-      expect((await as(FICHE_CRISE).get('/users/me')).body.regions_visibles).toEqual([93]);
-      expect((await as(REFERENT_IDF).get('/region')).body.map((r: { id_region: number }) => r.id_region)).toEqual([11]);
-      expect((await as(GIGN).get('/region')).body.length).toBe(18);
+    it('périmètres par défaut : carte selon le cahier des charges, planning restreint au GIGN', async () => {
+      const me = async (n: string) => (await as(n).get('/users/me')).body.perimetres as { carte: number[] | null; planning: number[] | null };
+      expect(await me(GIGN)).toEqual({ carte: null, planning: null });
+      expect(await me(SUPER_ADMIN)).toEqual({ carte: null, planning: null });
+      const ref = await me(REFERENT_IDF);
+      expect(ref.carte).toEqual(expect.arrayContaining([11, 24, 27, 28, 32, 44]));
+      expect(ref.planning).toEqual([11]);
+      expect((await me(NEGO_IDF)).planning).toEqual([11]);
+      expect(await me(LECTURE)).toEqual({ carte: null, planning: [11] });
+      expect(await me(OMS)).toEqual({ carte: [84], planning: [84] });
+      // Régions par module
+      const ids = async (n: string, module: string) => ((await as(n).get(`/region?module=${module}`)).body as { id_region: number }[]).map((r) => r.id_region).sort();
+      expect(await ids(REFERENT_IDF, 'planning')).toEqual([11]);
+      expect((await ids(REFERENT_IDF, 'carte')).length).toBe(6);
+      expect((await as(REFERENT_IDF).get('/region?module=x')).body.code).toBe('RNI-1002');
     });
-    it('régions voisines hors périmètre : carte, compteurs, calendrier', async () => {
+    it('carte : régions limitrophes visibles ; planning : sa région seule', async () => {
       const month = new Date().toISOString().slice(0, 7);
       const fc = (await as(REFERENT_IDF).get('/planning/geojson')).body;
-      expect(fc.features.every((f: { properties: { id_region: number } }) => f.properties.id_region === 11)).toBe(true);
+      const carteRegions = new Set(fc.features.map((f: { properties: { id_region: number } }) => f.properties.id_region));
+      expect(carteRegions.has(11)).toBe(true);
+      expect(carteRegions.has(44)).toBe(true);
       expect((await as(REFERENT_IDF).get('/region/getNbPositionServiceByRegion')).body.map((r: { id_region: number }) => r.id_region)).toEqual([11]);
       expect((await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&region=24`)).status).toBe(403);
-      const lecture = (await as(LECTURE).get('/planning/geojson')).body;
-      expect(lecture.features.every((f: { properties: { id_region: number } }) => f.properties.id_region === 11)).toBe(true);
     });
     it('la carte ne renvoie que les personnels du périmètre', async () => {
       const fc = (await as(OMS).get('/planning/geojson')).body;
@@ -310,6 +317,40 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_IDF).del(`/formulaire/${id}`)).body.code).toBe('RNI-1010');
       expect((await as(NEGO_IDF).del(`/formulaire/${id}`)).status).toBe(204);
       expect((await as(NEGO_IDF).get(`/formulaire/${id}`)).status).toBe(404);
+    });
+  });
+
+  describe('administration des périmètres (super administrateur)', () => {
+    it('réservée au super administrateur', async () => {
+      expect((await as(GIGN).get('/admin/perimetres')).status).toBe(403);
+      expect((await as(REFERENT_IDF).put('/admin/perimetres', { items: [] })).status).toBe(403);
+      const m = (await as(SUPER_ADMIN).get('/admin/perimetres')).body as { id_profil: number; carte: string; planning: string; locked: boolean }[];
+      expect(m.find((r) => r.id_profil === 3)).toMatchObject({ carte: 'region_voisines', planning: 'region', locked: false });
+      expect(m.find((r) => r.id_profil === 8)).toMatchObject({ carte: 'national', planning: 'national', locked: true });
+    });
+    it('modification appliquée immédiatement, puis rétablie', async () => {
+      const month = new Date().toISOString().slice(0, 7);
+      const put = (perimetre: string) => as(SUPER_ADMIN).put('/admin/perimetres', { items: [{ id_profil: 3, module: 'planning', perimetre }] });
+      const r = await put('region_voisines');
+      expect(r.status).toBe(200);
+      expect(r.body.find((x: { id_profil: number }) => x.id_profil === 3)).toMatchObject({ planning: 'region_voisines', updated_by: SUPER_ADMIN });
+      expect((await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&region=24`)).status).toBe(200);
+      expect((await as(REFERENT_IDF).get(`/planning/timetable?month=${month}`)).body.regions.length).toBe(6);
+      await put('region');
+      expect((await as(REFERENT_IDF).get(`/planning/timetable?month=${month}&region=24`)).status).toBe(403);
+    });
+    it('valeurs contrôlées ; super administrateur toujours national', async () => {
+      expect((await as(SUPER_ADMIN).put('/admin/perimetres', { items: [{ id_profil: 3, module: 'planning', perimetre: 'monde' }] })).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).put('/admin/perimetres', { items: [{ id_profil: 3, module: 'agenda', perimetre: 'region' }] })).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).put('/admin/perimetres', { items: [{ id_profil: 99, module: 'carte', perimetre: 'region' }] })).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).put('/admin/perimetres', { items: [{ id_profil: 8, module: 'carte', perimetre: 'region' }] })).status).toBe(403);
+    });
+    it('droits du super administrateur : ceux du GIGN, profil attribuable par lui seul', async () => {
+      expect((await as(SUPER_ADMIN).get('/users/isAdmin')).body).toBe(true);
+      expect((await as(SUPER_ADMIN).get('/formulaire')).status).toBe(200);
+      expect((await as(GIGN).post('/users', { nigend: '200016', id_profil: 8 })).status).toBe(403);
+      const sa = (await as(GIGN).get(`/users?q=${SUPER_ADMIN}`)).body.items[0] as { id_user: number };
+      expect((await as(GIGN).put(`/users/${sa.id_user}`, { commentaire: 'x' })).status).toBe(403);
     });
   });
 

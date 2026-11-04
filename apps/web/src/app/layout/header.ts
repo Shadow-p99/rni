@@ -73,6 +73,7 @@ export class Header {
     ];
     if (this.auth.canFormulaire()) out.push({ path: '/formulaire', label: 'Fiches de crise' });
     if (this.auth.isAdmin()) out.push({ path: '/gestion', label: 'Gestion du personnel' });
+    if (this.auth.isSuperAdmin()) out.push({ path: '/administration', label: 'Administration' });
     return out;
   });
 }

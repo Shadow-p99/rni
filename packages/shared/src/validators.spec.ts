@@ -1,5 +1,5 @@
 import { dedupeNeo, geolocIndicatif, isValidPhone, hasNameOrFirstName } from './validators.js';
-import { assignableProfils, perimetreOf, Profil, listableProfils } from './profils.js';
+import { assignableProfils, defaultPerimetre, Profil, listableProfils } from './profils.js';
 
 describe('validateurs', () => {
   it('téléphones FR et internationaux', () => {
@@ -30,11 +30,19 @@ describe('profils', () => {
     expect(listableProfils(Profil.REFERENT)).toEqual([3, 4, 7]);
     expect(listableProfils(Profil.GIGN)).toContain(Profil.OMS);
   });
-  it('périmètre (BR-AUTH-6)', () => {
-    expect(perimetreOf(Profil.GIGN)).toBe('national');
-    // Seul le GIGN voit toutes les régions ; tous les autres profils, leur région seule
-    for (const p of [Profil.LECTURE_SEULE, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.FICHE_CRISE, Profil.OMS, Profil.REFERENT_ADJOINT]) {
-      expect(perimetreOf(p)).toBe('region');
-    }
+  it('périmètres par défaut (BR-AUTH-6) : carte selon le cahier des charges, planning restreint', () => {
+    expect(defaultPerimetre(Profil.GIGN, 'carte')).toBe('national');
+    expect(defaultPerimetre(Profil.LECTURE_SEULE, 'carte')).toBe('national');
+    expect(defaultPerimetre(Profil.OMS, 'carte')).toBe('region');
+    for (const p of [Profil.REFERENT, Profil.NEGOCIATEUR, Profil.FICHE_CRISE, Profil.REFERENT_ADJOINT]) expect(defaultPerimetre(p, 'carte')).toBe('region_voisines');
+    expect(defaultPerimetre(Profil.GIGN, 'planning')).toBe('national');
+    for (const p of [Profil.LECTURE_SEULE, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.FICHE_CRISE, Profil.OMS, Profil.REFERENT_ADJOINT]) expect(defaultPerimetre(p, 'planning')).toBe('region');
+    expect(defaultPerimetre(Profil.SUPER_ADMIN, 'carte')).toBe('national');
+    expect(defaultPerimetre(Profil.SUPER_ADMIN, 'planning')).toBe('national');
+  });
+  it('super administrateur : seul à pouvoir attribuer son profil', () => {
+    expect(assignableProfils(Profil.SUPER_ADMIN)).toContain(Profil.SUPER_ADMIN);
+    expect(assignableProfils(Profil.GIGN)).not.toContain(Profil.SUPER_ADMIN);
+    expect(listableProfils(Profil.SUPER_ADMIN)).toContain(Profil.SUPER_ADMIN);
   });
 });

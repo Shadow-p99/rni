@@ -141,10 +141,11 @@ export class ServiceController {
   @Profiles(...ADMIN_PROFILS)
   async geolocPositions(@CurrentUser() user: RniUser) {
     const positions = await this.geoloc.positions();
-    if (user.regions_visibles == null) return positions;
+    const regions = user.perimetres.carte;
+    if (regions == null) return positions;
     const allowed = await this.db.select<{ geoloc_indicatif: string }>(
       `SELECT geoloc_indicatif FROM ref_user WHERE geoloc_indicatif IS NOT NULL AND NOT bool_user_inactif AND id_region IN (:regions)`,
-      { regions: user.regions_visibles.length ? user.regions_visibles : [-1] },
+      { regions: regions.length ? regions : [-1] },
     );
     const set = new Set(allowed.map((a) => a.geoloc_indicatif));
     return positions.filter((p) => set.has(p.indicatif));

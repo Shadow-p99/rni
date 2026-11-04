@@ -27,8 +27,12 @@ export class RegionSelect {
   private readonly ref = inject(ReferentielService);
   readonly label = input('');
   readonly nullLabel = input('Toutes les régions');
-  readonly scope = input<'visible' | 'all'>('visible');
+  /** `planning` (défaut) / `carte` : régions visibles dans le module ; `all` : toutes. */
+  readonly scope = input<'planning' | 'carte' | 'all'>('planning');
   readonly value = model<number | null>(null);
   protected readonly id = `rni-region-${++seq}`;
-  protected readonly regions = computed(() => (this.scope() === 'all' ? this.ref.allRegions() : this.ref.regions()));
+  protected readonly regions = computed(() => {
+    const s = this.scope();
+    return s === 'all' ? this.ref.allRegions() : s === 'carte' ? this.ref.carteRegions() : this.ref.regions();
+  });
 }

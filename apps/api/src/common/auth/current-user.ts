@@ -14,8 +14,8 @@ export interface RniUser {
   libelle_region: string | null;
   code_unite: string | null;
   libelle_unite: string | null;
-  /** Régions visibles (BR-AUTH-6) ; `null` = national. */
-  regions_visibles: number[] | null;
+  /** Régions visibles par module (BR-AUTH-6) ; `null` = national. */
+  perimetres: { carte: number[] | null; planning: number[] | null };
   geoloc_id_geoloc: string | null;
   geoloc_indicatif: string | null;
   geoloc_bool_geoloc: boolean;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { ErrorCode, FORMULAIRE_FIELDS, FormulaireDto, FormulaireFilter, Profil, hasNameOrFirstName, isIsoDate } from '@rni/shared';
+import { ErrorCode, FORMULAIRE_FIELDS, FormulaireDto, FormulaireFilter, hasNameOrFirstName, isIsoDate, isNationalAdmin } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 import { BusinessException } from '../../common/business.exception.js';
@@ -31,8 +31,9 @@ export class FormulaireService {
    * les autres uniquement les fiches dont l'auteur appartient à leur région.
    */
   async list(user: RniUser, filter: FormulaireFilter): Promise<FormulaireDto[]> {
-    const region = user.id_profil === Profil.GIGN ? (filter.region ?? null) : user.id_region;
-    if (user.id_profil !== Profil.GIGN && region == null) return [];
+    const national = isNationalAdmin(user.id_profil);
+    const region = national ? (filter.region ?? null) : user.id_region;
+    if (!national && region == null) return [];
     if (filter.from && !isIsoDate(filter.from)) throw BusinessException.invalid('Date de début invalide.');
     if (filter.to && !isIsoDate(filter.to)) throw BusinessException.invalid('Date de fin invalide.');
     const where: string[] = [];
@@ -49,7 +50,7 @@ export class FormulaireService {
   async get(user: RniUser, id: number): Promise<FormulaireDto> {
     const row = await this.db.one<FormulaireDto>(`${SELECT} WHERE f.id_formulaire = :id`, { id });
     if (!row) throw BusinessException.notFound('Fiche introuvable.');
-    if (user.id_profil !== Profil.GIGN && row.auteur_id_region !== user.id_region) {
+    if (!isNationalAdmin(user.id_profil) && row.auteur_id_region !== user.id_region) {
       throw new BusinessException(ErrorCode.HORS_PERIMETRE, undefined, 403);
     }
     return row;

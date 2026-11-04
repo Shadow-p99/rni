@@ -13,6 +13,7 @@ import {
   assignableProfils,
   geolocIndicatif,
   isAdminProfil,
+  isNationalAdmin,
   isValidPhone,
   listableProfils,
   MAX_COUNTED_ROWS,
@@ -73,8 +74,10 @@ export class UsersService {
       libelle_profil: u.libelle_profil,
       id_region: u.id_region,
       libelle_region: u.libelle_region,
-      regions_visibles: u.regions_visibles,
+      regions_visibles: u.perimetres.planning,
+      perimetres: u.perimetres,
       is_admin: isAdminProfil(u.id_profil),
+      is_super_admin: u.id_profil === Profil.SUPER_ADMIN,
       geoloc_id_geoloc: u.geoloc_id_geoloc,
       geoloc_indicatif: u.geoloc_indicatif,
       geoloc_bool_geoloc: u.geoloc_bool_geoloc,
@@ -89,7 +92,7 @@ export class UsersService {
    */
   async list(current: RniUser, query: UserListQuery): Promise<Page<UserDto>> {
     const { page, size, offset } = normalizePage(query.page, query.size);
-    const isGign = current.id_profil === Profil.GIGN;
+    const isGign = isNationalAdmin(current.id_profil);
     if (!isGign && query.region != null && query.region !== current.id_region) {
       throw new BusinessException(ErrorCode.HORS_PERIMETRE, 'Un référent ne consulte que le personnel de sa région.', 403);
     }
@@ -135,7 +138,7 @@ export class UsersService {
     if (!terms.length) return [];
     let scope = '';
     if (current.id_profil === Profil.NEGOCIATEUR) scope = 'AND id_user = :me';
-    else if (current.id_profil !== Profil.GIGN) scope = 'AND id_region = :region';
+    else if (!isNationalAdmin(current.id_profil)) scope = 'AND id_region = :region';
     return this.db.select<UserDto>(
       `SELECT ${USER_COLUMNS} FROM v_user_detail
         WHERE NOT bool_user_inactif AND id_profil IN (:profils) ${scope}
@@ -149,7 +152,7 @@ export class UsersService {
   async searchRpsi(current: RniUser, q: string): Promise<RpsiPersonnelDto[]> {
     if ((q ?? '').trim().length < 3) return [];
     const terms = searchTerms(q);
-    const scope = current.id_profil === Profil.GIGN ? '' : 'AND v.id_region = :region';
+    const scope = isNationalAdmin(current.id_profil) ? '' : 'AND v.id_region = :region';
     return this.db.select<RpsiPersonnelDto>(
       `SELECT v.nigend, v.nom, v.prenom, v.grade, v.code_unite, v.libelle_unite, v.id_region, v.libelle_region,
               ru.id_user, ru.bool_user_inactif
@@ -177,7 +180,11 @@ export class UsersService {
   }
 
   private assertManageable(current: RniUser, target: { id_region: number | null; id_profil: number }): void {
-    if (current.id_profil === Profil.GIGN) return;
+    // Seul un super administrateur gère les comptes super administrateur
+    if (target.id_profil === Profil.SUPER_ADMIN && current.id_profil !== Profil.SUPER_ADMIN) {
+      throw BusinessException.forbidden('Seul un super administrateur gère ce compte.');
+    }
+    if (isNationalAdmin(current.id_profil)) return;
     if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
     if (GIGN_ONLY_PROFILS.includes(target.id_profil)) throw BusinessException.forbidden('Seul le GIGN gère les comptes GIGN et OMS.');
     if (target.id_region == null || target.id_region !== current.id_region) {
@@ -267,7 +274,7 @@ export class UsersService {
       if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
       const target = await this.users.findOne({ where: { nigend, bool_user_inactif: false } });
       if (!target) throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU);
-      if (current.id_profil !== Profil.GIGN && target.id_region !== current.id_region) throw BusinessException.forbidden();
+      if (!isNationalAdmin(current.id_profil) && target.id_region !== current.id_region) throw BusinessException.forbidden();
     }
     return this.remop.lines(nigend);
   }

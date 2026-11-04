@@ -7,6 +7,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter.js';
 import { SplunkInterceptor } from './common/splunk.interceptor.js';
 import { ConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 import { ExternalModule } from './modules/external/external.module.js';
 import { FormulaireModule } from './modules/formulaire/formulaire.module.js';
 import { PlanningModule } from './modules/planning/planning.module.js';
@@ -27,6 +28,7 @@ import { UsersModule } from './modules/users/users.module.js';
     PlanningModule,
     FormulaireModule,
     ServiceModule,
+    AdminModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

@@ -10,8 +10,10 @@ export class ReferentielService {
   readonly positions = signal<PositionServiceDto[]>([]);
   readonly creneaux = signal<CreneauDto[]>([]);
   readonly profils = signal<ProfilDto[]>([]);
-  /** Régions visibles par l'utilisateur (BR-AUTH-6). */
+  /** Régions visibles sur le planning (BR-AUTH-6, paramétrable par profil). */
   readonly regions = signal<RegionDto[]>([]);
+  /** Régions visibles sur la carte (périmètre propre à la carte). */
+  readonly carteRegions = signal<RegionDto[]>([]);
   readonly allRegions = signal<RegionDto[]>([]);
   readonly loaded = signal(false);
   private loading: Promise<boolean> | null = null;
@@ -24,17 +26,19 @@ export class ReferentielService {
     this.loading ??= (async () => {
       try {
         const o = { silent: true };
-        const [positions, creneaux, profils, regions, all] = await Promise.all([
+        const [positions, creneaux, profils, regions, carte, all] = await Promise.all([
           firstValueFrom(this.api.positions(o)),
           firstValueFrom(this.api.creneaux(o)),
           firstValueFrom(this.api.profils(o)),
-          firstValueFrom(this.api.visibleRegions(o)),
+          firstValueFrom(this.api.visibleRegions('planning', o)),
+          firstValueFrom(this.api.visibleRegions('carte', o)),
           firstValueFrom(this.api.allRegions(o)),
         ]);
         this.positions.set(positions);
         this.creneaux.set(creneaux);
         this.profils.set(profils);
         this.regions.set(regions);
+        this.carteRegions.set(carte);
         this.allRegions.set(all);
         this.loaded.set(true);
         return true;
@@ -60,7 +64,8 @@ export class ReferentielService {
     return this.allRegions().find((r) => r.id_region === id)?.libelle ?? '—';
   }
 
+  /** Centre d'une région (cadrage de la carte). */
   regionCenter(id: number | null | undefined) {
-    return this.regions().find((r) => r.id_region === id)?.center ?? null;
+    return (this.carteRegions().find((r) => r.id_region === id) ?? this.allRegions().find((r) => r.id_region === id))?.center ?? null;
   }
 }

@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { formulaireGuard, isAdminGuard, isUserGuard, referentielResolver } from './core/auth/auth.guards';
+import { formulaireGuard, isAdminGuard, isUserGuard, referentielResolver, superAdminGuard } from './core/auth/auth.guards';
 import { unsavedChangesGuard } from './core/platform/unsaved-changes.guard';
 
 export const routes: Routes = [
@@ -42,6 +42,13 @@ export const routes: Routes = [
         title: 'Gestion du personnel — RNI',
         canActivate: [isAdminGuard],
         loadComponent: () => import('./features/gestion/gestion-page').then((m) => m.GestionPage),
+      },
+      {
+        path: 'administration',
+        title: 'Administration — RNI',
+        canActivate: [superAdminGuard],
+        canDeactivate: [unsavedChangesGuard],
+        loadComponent: () => import('./features/admin/perimetres-page').then((m) => m.PerimetresPage),
       },
     ],
   },

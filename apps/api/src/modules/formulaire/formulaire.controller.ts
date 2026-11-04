@@ -6,7 +6,7 @@ import { FormulaireService } from './formulaire.service.js';
 
 /** BR-FOR-1 appliqué côté serveur (dette §9.3) : profils 2, 5, 6 exclus, y compris en lecture. */
 @Controller('formulaire')
-@Profiles(Profil.GIGN, Profil.REFERENT, Profil.REFERENT_ADJOINT, Profil.NEGOCIATEUR)
+@Profiles(Profil.SUPER_ADMIN, Profil.GIGN, Profil.REFERENT, Profil.REFERENT_ADJOINT, Profil.NEGOCIATEUR)
 export class FormulaireController {
   constructor(private readonly service: FormulaireService) {}
 

@@ -10,10 +10,24 @@ INSERT INTO ref_profil (id_profil, code, libelle) VALUES
   (4, 'N',  'Négociateur'),
   (5, NULL, 'Fiche de crise'),
   (6, 'O',  'OMS'),
-  (7, 'RA', 'Référent adjoint');
+  (7, 'RA', 'Référent adjoint'),
+  (8, 'SA', 'Super administrateur');
 
 INSERT INTO t_profil_classement (id_profil, classement) VALUES
-  (1, 1), (3, 2), (7, 3), (4, 4), (6, 5), (5, 6), (2, 7);
+  (8, 0), (1, 1), (3, 2), (7, 3), (4, 4), (6, 5), (5, 6), (2, 7);
+
+-- BR-AUTH-6 : périmètres initiaux (modifiables par le super administrateur)
+--   carte    : cahier des charges (GIGN / lecture seule nationaux, OMS sa région, autres + limitrophes)
+--   planning : seul le GIGN voit toutes les régions
+INSERT INTO t_perimetre_profil (id_profil, module, perimetre) VALUES
+  (8, 'carte', 'national'),        (8, 'planning', 'national'),
+  (1, 'carte', 'national'),        (1, 'planning', 'national'),
+  (2, 'carte', 'national'),        (2, 'planning', 'region'),
+  (3, 'carte', 'region_voisines'), (3, 'planning', 'region'),
+  (4, 'carte', 'region_voisines'), (4, 'planning', 'region'),
+  (5, 'carte', 'region_voisines'), (5, 'planning', 'region'),
+  (6, 'carte', 'region'),          (6, 'planning', 'region'),
+  (7, 'carte', 'region_voisines'), (7, 'planning', 'region');
 
 INSERT INTO ref_pos_service (id_pos_service, libelle, color, is_actif) VALUES
   (1, 'Disponible',   '#16a34a', true),

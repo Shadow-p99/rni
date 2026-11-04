@@ -84,7 +84,7 @@ export class PlanningService {
     } catch {
       throw BusinessException.invalid('Mois invalide (AAAA-MM attendu).');
     }
-    const regions = this.perimetre.restrict(user, region);
+    const regions = this.perimetre.restrict(user, 'planning', region);
     const start = toSlot(bounds.first, 1);
     const end = toSlot(bounds.last, 2);
     const terms = searchTerms(filter.q);
@@ -154,7 +154,7 @@ export class PlanningService {
   /** §5.5 : plannings couvrant une date (Jour ou Nuit), bornés aux profils 3/4/7. */
   async byDate(user: RniUser, date: string, filter: { region?: number; nigend?: string; id_pos_service?: number }): Promise<PlanningDetailDto[]> {
     validateDate(date);
-    const regions = this.perimetre.restrict(user, filter.region);
+    const regions = this.perimetre.restrict(user, 'planning', filter.region);
     const start = toSlot(date, 1);
     const [plannings, users] = await Promise.all([
       this.repo.planningsBetween(start, start + 1, regions, { nigend: filter.nigend, id_pos_service: filter.id_pos_service }),
@@ -199,7 +199,8 @@ export class PlanningService {
   /** Carte : `GET /planning/geojson` (§4.2). */
   async geojson(user: RniUser, now = new Date()): Promise<PersonnelCollection> {
     const [current, positions, geoloc] = await Promise.all([
-      this.currentPositions(user.regions_visibles, now),
+      // La carte a son propre périmètre (BR-AUTH-6 paramétrable)
+      this.currentPositions(user.perimetres.carte, now),
       this.positions(),
       this.safeGeoloc(),
     ]);
@@ -266,6 +267,7 @@ export class PlanningService {
   assertCanWrite(current: RniUser, target: { id_user: number; id_region: number | null }): void {
     switch (current.id_profil) {
       case Profil.GIGN:
+      case Profil.SUPER_ADMIN:
         return;
       case Profil.REFERENT:
       case Profil.REFERENT_ADJOINT:

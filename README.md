@@ -43,7 +43,8 @@ Comptes fictifs utiles :
 | Nigend | Profil | Région |
 |---|---|---|
 | `100001` | GIGN (défaut) | national |
-| `100002` | Lecture seule | national |
+| `100005` | Super administrateur (écran Administration) | national |
+| `100002` | Lecture seule | carte : national ; planning : Île-de-France |
 | `100003` | OMS | Auvergne-Rhône-Alpes |
 | `100004` | Fiche de crise (profil 5) | PACA |
 | `200073` | Référent | Île-de-France |
@@ -84,7 +85,7 @@ navigateur ──► reverse-proxy SSO (en-têtes nigend, cn, title…) ──�
 
 | Dossier | Contenu |
 |---|---|
-| `common/auth` | `AuthGuard` global (BR-AUTH-1/2 : 401 sans `nigend` ou nigend non habilité ; matrice déclarative `@Profiles`), `PerimetreService` (BR-AUTH-6 : toutes les régions pour le GIGN, sa région seule pour les autres profils), simulation SSO de dev |
+| `common/auth` | `AuthGuard` global (BR-AUTH-1/2 : 401 sans `nigend` ou nigend non habilité ; matrice déclarative `@Profiles`), `PerimetreService` (BR-AUTH-6 : périmètre par profil et par module, paramétré dans `t_perimetre_profil`), simulation SSO de dev |
 | `common` | Filtre d'erreurs (BR-SEC-2 : `t_admin_logs` + libellé `t_admin_messages`, repli si la base tombe), intercepteur d'audit Splunk (BR-SEC-1 : `t_admin_log_splunk`) |
 | `database` | Modèles Sequelize, accès SQL **paramétré** (`Db`) |
 | `modules/planning` | Calendrier mensuel, GeoJSON de la carte, création / modification / suppression / **insertion transactionnelle** |
@@ -102,8 +103,9 @@ POST /users          PUT /users/:id   DELETE /users/:id   PUT /users/infoDeviceU
 GET  /planning/timetable?month=AAAA-MM&region=&q=&positions=1,4,0   /planning/geojson   /planning/:id
 GET  /planning/byDateAndIdRegion/:date  /planning/byNigendAndDate/:nigend/:date  /planning/byPositionAndDate/:id/:date
 POST /planning   PUT /planning/:id   DELETE /planning/:id   POST /planning/insert
-GET  /region  /region/all  /region/getNbPositionServiceByRegion  /region/getNbPositionServiceAllRegionMobile?from=&to=
+GET  /region?module=carte|planning  /region/all  /region/getNbPositionServiceByRegion  /region/getNbPositionServiceAllRegionMobile?from=&to=
 GET  /formulaire?region=&closed=&from=&to=   /formulaire/:id   POST /formulaire   PUT /formulaire/:id   PUT /formulaire/:id/close   DELETE /formulaire/:id
+GET  /admin/perimetres   PUT /admin/perimetres   (super administrateur)
 GET  /referentiel/positions?actif=true  /referentiel/creneaux  /referentiel/profils  /referentiel/grades  /referentiel/departements
 GET  /service  /service/alive  /service/configuration?idConfig=  /service/testvie  /service/carto
 GET  /service/geoloc  /service/coordinates?address=  /service/isochrone?x=&y=  /service/listTelUser/:nigend
@@ -116,7 +118,7 @@ authentifié, 403 non autorisé / hors périmètre, 404 introuvable.
 
 - `init/01-schema.sql` : tables, vues `v_personnel_to_ref_user` et `v_user_detail`.
 - `init/02-referentiels.sql` : profils, positions (couleurs), créneaux, grades, régions INSEE et
-  voisinages (non utilisés depuis la restriction de BR-AUTH-6), centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
+  voisinages, périmètres initiaux par profil et par module, centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
 - `init/03-param-app.sql` : paramétrage de développement ; `env/param-app.template.sql` pour la prod.
 - `migrations/*.sql` : évolutions idempotentes à appliquer sur une base existante (`pnpm db:migrate`).
 - `dev/90-seed-dev.sql` : **jeu de données fictif** (unités, ~110 personnels RPSI, comptes, plannings
@@ -183,6 +185,7 @@ pendant l'enregistrement), `ConfirmService`, `Toasts` (avec action), `AsyncView`
 | `/carte` | Carte Leaflet : fonds Facade (XYZ / WMTS, OSM par défaut), clusters 20 px colorés (Alerte puis Disponible), fiche au clic avec navigation numérotée, filtres, légende, point de crise par adresse ou clic, isochrones 30/60/90 min, export PNG, actualisation 60 s | habilités |
 | `/planning` | **Une seule page, deux interfaces** selon la largeur d'écran (bascule en direct à 1038 px). Bureau : calendrier mensuel par région (chargement à la demande : la région de l'utilisateur à l'ouverture, les autres au dépliage ; compteurs par position toujours affichés), **recherche et filtre « Maintenant » exécutés par l'API dans tout le périmètre**, demi-cases Jour / Nuit, saisie / modification / insertion / suppression, export PDF A4 paysage. Mobile : calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide. `/planning-mobile` redirige vers `/planning` | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
+| `/administration` | Périmètres de visualisation par profil sur la carte et le planning (modifications non enregistrées signalées) | super administrateur |
 | `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
 | `/testvie` | Monitoring : API, base, Facade, GEOLOC, REMOP | public |
 | `/indisponible`, `/unauthorized`, `**` | Service indisponible (réessai), accès refusé, page introuvable | public |
@@ -228,11 +231,18 @@ Les autocomplétions (RPSI, personnel du planning) utilisent les mêmes index et
 
 Le cahier des charges laisse quelques points ouverts ; voici les choix retenus :
 
-1. **Périmètre géographique (BR-AUTH-6, règle modifiée)** : **seul le profil GIGN voit toutes les
-   régions** ; tous les autres profils (référent, référent adjoint, négociateur, OMS, lecture seule,
-   fiche de crise) ne voient **que leur région** — carte, planning, compteurs, recherche, listes.
-   Les régions voisines (`ref_nrb_region_r22`) ne sont plus utilisées ; la table est conservée.
-   Les écritures (planning, personnel) restent limitées à sa région.
+1. **Périmètre géographique (BR-AUTH-6, paramétrable)** : les régions visibles sont réglées **par profil
+   et par module** (carte, planning) par le **super administrateur** (profil 8), dans l'écran
+   **Administration** (`/administration`, table `t_perimetre_profil`) : toutes les régions, sa région +
+   régions limitrophes, ou sa région seule. Valeurs initiales :
+   - **carte** : cahier des charges (GIGN et lecture seule : toutes les régions ; OMS : sa région ;
+     référent, référent adjoint, négociateur, fiche de crise : sa région + limitrophes) ;
+   - **planning** : seul le GIGN voit toutes les régions ; tous les autres profils, leur région.
+
+   Le super administrateur a les droits du GIGN, son périmètre est toujours national ; son profil n'est
+   attribuable que par un super administrateur (le premier : `UPDATE ref_user SET id_profil = 8 WHERE nigend = '…'`).
+   Les modifications s'appliquent sous 30 s côté API (au prochain rechargement côté écran) et sont tracées.
+   Les droits d'écriture (planning, personnel) restent limités à sa région.
 2. **Négociateur** : en plus de BR-PLA-4, il ne peut pas **supprimer** une plage Alerte / Formateur.
 3. **Insertion** : les plages avant / après gardent l'adresse de la plage initiale ; la période insérée
    prend l'adresse saisie, sinon celle de la plage initiale. La nouvelle position doit différer (RNI-1007).

@@ -8,7 +8,7 @@ export class CreateUserBody implements CreateUserDto {
 
   @Type(() => Number)
   @IsInt()
-  @IsIn([1, 2, 3, 4, 5, 6, 7])
+  @IsIn([1, 2, 3, 4, 5, 6, 7, 8])
   id_profil: number;
 }
 
@@ -16,7 +16,7 @@ export class UpdateUserBody implements UpdateUserDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @IsIn([1, 2, 3, 4, 5, 6, 7])
+  @IsIn([1, 2, 3, 4, 5, 6, 7, 8])
   id_profil?: number;
 
   @IsOptional()

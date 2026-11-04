@@ -69,10 +69,13 @@ export class CarteStore {
   readonly isoVisible = signal(true);
   readonly canCrise = this.auth.hasExtendedRights;
 
-  /** Cadrage initial : la région pour les profils régionaux (≠ 1, 2), sinon la France. */
+  /**
+   * Cadrage initial : sur sa région dès que le périmètre « carte » du profil n'est pas national
+   * (par défaut : tous les profils sauf GIGN et lecture seule), sinon la France entière.
+   */
   readonly initialView = computed<MapView>(() => {
     const u = this.auth.user();
-    if (u && u.id_profil !== Profil.GIGN && u.id_profil !== Profil.LECTURE_SEULE) {
+    if (u && u.perimetres.carte != null) {
       const c = this.ref.regionCenter(u.id_region);
       if (c) return { lat: c.lat, lng: c.lng, zoom: c.zoom };
     }

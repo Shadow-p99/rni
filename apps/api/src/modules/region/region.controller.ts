@@ -1,5 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { RegionCountsDto, RegionDto, compactToIso, isIsoDate } from '@rni/shared';
+import { PerimetreModule, RegionCountsDto, RegionDto, compactToIso, isIsoDate } from '@rni/shared';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
@@ -12,6 +12,12 @@ interface RegionRow {
   x: number | null;
   y: number | null;
   zoom: number | null;
+}
+
+function toModule(v?: string): PerimetreModule {
+  if (v == null || v === '' || v === 'planning') return 'planning';
+  if (v === 'carte') return 'carte';
+  throw BusinessException.invalid('Module inconnu (carte ou planning).');
 }
 
 @Controller('region')
@@ -37,10 +43,13 @@ export class RegionController {
     }));
   }
 
-  /** Régions visibles par l'utilisateur (BR-AUTH-6), avec leur centre (t_region_center). */
+  /**
+   * Régions visibles par l'utilisateur (BR-AUTH-6) dans un module (`carte` ou `planning`, défaut :
+   * planning), avec leur centre (t_region_center).
+   */
   @Get()
-  visible(@CurrentUser() user: RniUser): Promise<RegionDto[]> {
-    return this.regions(user.regions_visibles);
+  visible(@CurrentUser() user: RniUser, @Query('module') module?: string): Promise<RegionDto[]> {
+    return this.regions(user.perimetres[toModule(module)]);
   }
 
   /** Toutes les régions (libellés), utile aux listes de filtres. */
@@ -53,8 +62,8 @@ export class RegionController {
   @Get('getNbPositionServiceByRegion')
   async counts(@CurrentUser() user: RniUser): Promise<RegionCountsDto[]> {
     const [regions, current] = await Promise.all([
-      this.regions(user.regions_visibles),
-      this.planning.currentPositions(user.regions_visibles),
+      this.regions(user.perimetres.planning),
+      this.planning.currentPositions(user.perimetres.planning),
     ]);
     const out = new Map<number, RegionCountsDto>(
       regions.map((r) => [r.id_region, { id_region: r.id_region, libelle: r.libelle, counts: {}, sans_planning: 0 }]),
@@ -76,7 +85,7 @@ export class RegionController {
     const f = iso(from);
     const t = iso(to);
     if (!isIsoDate(f) || !isIsoDate(t) || f > t) throw BusinessException.invalid('Période invalide.');
-    const regions = this.perimetre.restrict(user, region ? Number(region) : undefined);
+    const regions = this.perimetre.restrict(user, 'planning', region ? Number(region) : undefined);
     return this.planning.dailyCounts(regions, f, t);
   }
 }

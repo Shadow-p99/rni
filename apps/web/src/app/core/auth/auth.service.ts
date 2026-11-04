@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { CurrentUserDto, Profil, canAccessFormulaire, isAdminProfil } from '@rni/shared';
+import { CurrentUserDto, Profil, canAccessFormulaire, isAdminProfil, isNationalAdmin } from '@rni/shared';
 import { firstValueFrom } from 'rxjs';
 import { UsersApi } from '../api/users.api';
 import { AppError, toAppError } from '../errors/app-error';
@@ -25,12 +25,14 @@ export class AuthService {
 
   readonly profil = computed(() => this.user()?.id_profil ?? null);
   readonly isAdmin = computed(() => isAdminProfil(this.profil()));
-  readonly isGign = computed(() => this.profil() === Profil.GIGN);
+  /** Administrateur national (GIGN ou super administrateur) : toutes les régions, tous les comptes. */
+  readonly isGign = computed(() => isNationalAdmin(this.profil()));
+  readonly isSuperAdmin = computed(() => this.profil() === Profil.SUPER_ADMIN);
   /** `checkAuthorization` : droits étendus (1, 3, 7) — crise, plannings des autres. */
   readonly hasExtendedRights = computed(() => isAdminProfil(this.profil()));
   readonly canFormulaire = computed(() => canAccessFormulaire(this.profil()));
   /** Écritures planning : profils 1, 3, 4, 7. */
-  readonly canWritePlanning = computed(() => [1, 3, 4, 7].includes(this.profil() ?? -1));
+  readonly canWritePlanning = computed(() => [1, 3, 4, 7, 8].includes(this.profil() ?? -1));
 
   load(force = false): Promise<AuthStatus> {
     const s = this.status();
@@ -64,13 +66,15 @@ export class AuthService {
   canEditPlanningOf(target: { id_user: number; id_region: number | null }): boolean {
     const me = this.user();
     if (!me || !this.canWritePlanning()) return false;
-    if (me.id_profil === Profil.GIGN) return true;
+    if (isNationalAdmin(me.id_profil)) return true;
     if (me.id_profil === Profil.NEGOCIATEUR) return me.id_user === target.id_user;
     return me.id_region === target.id_region;
   }
 
   /** Le profil GIGN / OMS n'est pas gérable par un référent régional (BR-GPU-3). */
   canManageUser(target: { id_profil: number; id_region: number | null }): boolean {
+    // Seul un super administrateur gère un compte super administrateur
+    if (target.id_profil === Profil.SUPER_ADMIN) return this.isSuperAdmin();
     if (this.isGign()) return true;
     return this.isAdmin() && ![Profil.GIGN, Profil.OMS].includes(target.id_profil) && target.id_region === this.user()?.id_region;
   }

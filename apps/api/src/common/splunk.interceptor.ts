@@ -6,7 +6,7 @@ import { AdminLogService } from './admin-log.service.js';
 import type { RniRequest } from './auth/current-user.js';
 import { NO_AUDIT_KEY } from './auth/decorators.js';
 
-const AUDITED = [/\/users(\/|$)/, /\/planning(\/|$)/, /\/formulaire(\/|$)/, /\/service\/(geoloc|coordinates|isochrone)/];
+const AUDITED = [/\/admin(\/|$)/, /\/users(\/|$)/, /\/planning(\/|$)/, /\/formulaire(\/|$)/, /\/service\/(geoloc|coordinates|isochrone)/];
 
 /** BR-SEC-1 : une ligne `t_admin_log_splunk` par requête sur les routes métier. */
 @Injectable()
