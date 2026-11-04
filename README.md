@@ -275,3 +275,35 @@ Voir [`deploy/PROCEDURE-DEPLOIEMENT.md`](deploy/PROCEDURE-DEPLOIEMENT.md) : pm2 
 Nginx (`deploy/nginx-rni.conf`), script `deploy/install.sh` (sauvegarde, rsync, redémarrage, test de
 vie). CI : [`.gitlab-ci.yml`](.gitlab-ci.yml) (forge interne, livraison sur tag) et
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+### Conteneurs Docker
+
+Deux images, construites depuis la **racine du monorepo** (contexte partagé, `.dockerignore`) :
+
+| Image | Dockerfile | Contenu |
+|---|---|---|
+| `rni-api` | `apps/api/Dockerfile` | Build multi-étapes, `pnpm deploy --prod` (dépendances de production seules, `db/` inclus), Node 22 Alpine, utilisateur `node`, port 8096, `TZ=Europe/Paris`, sonde `/rni/api/service/alive` |
+| `rni-web` | `apps/web/Dockerfile` | Build Angular de production servi par Nginx non root (port 8080) sous `/rni/`, reverse-proxy `/rni/api` → `API_UPSTREAM` (défaut `http://api:8096`), en-têtes de sécurité, `index.html` non mis en cache |
+
+Démonstration locale complète (base + API + client, authentification et services externes simulés) :
+
+```bash
+pnpm docker:up                                      # http://localhost:8080/rni/
+docker compose --profile tools run --rm migrate     # migrations sur une base existante
+pnpm docker:down
+```
+
+Build derrière un proxy d'entreprise avec une autorité de certification interne :
+
+```bash
+docker build -f apps/api/Dockerfile -t rni-api \
+  --build-arg HTTPS_PROXY=http://proxy:3128 \
+  --secret id=ca_certs,src=/etc/ssl/certs/ca-interne.pem .
+```
+
+En préproduction / production, l'image API s'exécute avec `NODE_ENV=production` (défaut) :
+l'authentification simulée y est **refusée au démarrage**. Variables à fournir : `PG_HOST`,
+`PG_PORT`, `PG_USER`, `PG_PASSWORD`, `PG_DATABASE`, `PG_SSL`, `CORS_ORIGINS`, et si besoin
+`NODE_EXTRA_CA_CERTS` (certificat monté en volume) pour les appels HTTPS vers REMOP / GEOLOC /
+Facade. Le conteneur `rni-web` doit rester **derrière le reverse-proxy SSO**, qui écrase les en-têtes
+`nigend` / `cn` / `title` ; il ne doit pas être exposé directement aux navigateurs.

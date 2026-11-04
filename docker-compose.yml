@@ -1,6 +1,9 @@
 # PostgreSQL de développement, initialisé avec le schéma, les référentiels et le jeu de données fictif.
-#   pnpm db:up      → démarre la base (port 5432, rni / rni)
+#   pnpm db:up      → démarre la base seule (port 5432, rni / rni)
 #   pnpm db:reset   → recrée la base depuis les scripts
+# Application complète conteneurisée (base + API + client Nginx) :
+#   pnpm docker:up  → http://localhost:8080/rni/  (authentification simulée, services externes simulés)
+#   docker compose --profile tools run --rm migrate   → applique db/migrations sur la base existante
 services:
   db:
     image: postgres:16
@@ -23,6 +26,61 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: rni-api
+    container_name: rni-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Démonstration locale : l'authentification simulée n'est autorisée qu'en development.
+      # En préproduction / production : NODE_ENV=production, RNI_MOCK_AUTH=false, RNI_MOCK_EXTERNAL=false
+      NODE_ENV: development
+      RNI_MOCK_AUTH: 'true'
+      RNI_MOCK_EXTERNAL: 'true'
+      MOCK_NIGEND: '100001'
+      CORS_ORIGINS: http://localhost:8080
+      PG_HOST: db
+      PG_PORT: 5432
+      PG_USER: rni
+      PG_PASSWORD: rni
+      PG_DATABASE: rni
+    expose:
+      - '8096'
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: rni-web
+    container_name: rni-web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_UPSTREAM: http://api:8096
+    ports:
+      - '8080:8080'
+
+  # Migrations idempotentes (base existante) : docker compose --profile tools run --rm migrate
+  migrate:
+    image: postgres:16
+    profiles: [tools]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: rni
+      PGPASSWORD: rni
+      PGDATABASE: rni
+    volumes:
+      - ./apps/api/db/migrations:/migrations:ro
+    entrypoint: ['sh', '-c', 'for f in /migrations/*.sql; do echo "→ $$f"; psql -v ON_ERROR_STOP=1 -q -f "$$f" || exit 1; done']
 
 volumes:
   rni-pgdata:

@@ -1,0 +1,20 @@
+# Contexte de build Docker (racine du monorepo)
+**/node_modules
+**/dist
+**/.angular
+**/coverage
+**/*.tsbuildinfo
+release
+.pnpm-store
+.git
+.github
+.gitlab-ci.yml
+.vscode
+.idea
+**/.env
+**/.env.*
+!**/.env.example
+docs
+deploy
+*.md
+!apps/web/src/**/*.md
