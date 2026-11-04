@@ -28,6 +28,7 @@ export class AdminLayout {
   protected readonly tabs = [
     { path: 'tableau-de-bord', label: 'Tableau de bord' },
     { path: 'journal', label: 'Journal' },
+    { path: 'journalisation', label: 'Réglages des journaux' },
     { path: 'perimetres', label: 'Périmètres' },
   ];
 }

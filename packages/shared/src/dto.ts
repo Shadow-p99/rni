@@ -476,3 +476,48 @@ export interface AdminDashboardDto {
     journal: { lignes: number; plus_ancien: string | null };
   };
 }
+
+// -----------------------------------------------------------------------------
+// Réglages de journalisation (écran Administration)
+// -----------------------------------------------------------------------------
+
+export type LogThreshold = 'error' | 'warn' | 'log' | 'debug' | 'verbose';
+export const LOG_THRESHOLDS: readonly LogThreshold[] = ['error', 'warn', 'log', 'debug', 'verbose'];
+/** Seuil de conservation en base : verbose exclu (volume). */
+export const LOG_DB_THRESHOLDS: readonly LogThreshold[] = ['error', 'warn', 'log', 'debug'];
+/** Durées de validité proposées pour un réglage verbeux (minutes ; null = permanent). */
+export const LOG_DURATIONS: readonly (number | null)[] = [15, 60, 240, null];
+/** Nom de contexte (nom de service, HTTP, SQL…). */
+export const LOG_CONTEXT_PATTERN = /^[A-Za-z][\w.-]{0,79}$/;
+export const MAX_LOG_CONTEXTS = 30;
+
+export interface LogContextLevel {
+  contexte: string;
+  niveau: LogThreshold;
+}
+
+/** Valeurs modifiables (formulaire). `level` vide = valeur par défaut du serveur (LOG_LEVEL). */
+export interface LogSettingsValues {
+  level: LogThreshold | '';
+  contexts: LogContextLevel[];
+  sql: boolean;
+  slow_ms: number;
+  db_level: LogThreshold;
+  retention_days: number;
+  metrics_retention_days: number;
+}
+
+export interface LogSettingsUpdateDto extends LogSettingsValues {
+  /** Validité des réglages verbeux (niveau, contextes, SQL) en minutes ; null = permanent. */
+  duree_min: number | null;
+}
+
+export interface LogSettingsDto {
+  enregistre: LogSettingsValues & { expires_at: string | null; expire: boolean };
+  /** Réglages effectivement appliqués par le processus qui a répondu. */
+  applique: { pid: number; level: LogThreshold; source: 'base' | 'environnement'; contexts: Record<string, LogThreshold>; sql: boolean; slow_ms: number; db_level: string };
+  /** Valeurs de l'environnement du serveur (LOG_LEVEL, PG_LOGGING). */
+  defaut: { level: LogThreshold; sql: boolean };
+  contextes_connus: string[];
+  derniere_modification: { par: string; nom: string | null; le: string } | null;
+}

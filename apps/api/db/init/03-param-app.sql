@@ -32,4 +32,7 @@ INSERT INTO t_param_app (cle_param_app, valeur, description, is_front) VALUES
   ('rni.log.db_level',                     'log',                       'Niveau à partir duquel les journaux sont conservés en base (tableau de bord) : error, warn, log, debug', false),
   ('rni.log.retention_days',               '14',                        'Durée de conservation du journal applicatif en base (jours)', false),
   ('rni.metrics.retention_days',           '30',                        'Durée de conservation des métriques de requêtes (jours)', false),
-  ('rni.dashboard.active_minutes',         '5',                         'Fenêtre (minutes) au-delà de laquelle un utilisateur n''est plus compté comme connecté', false);
+  ('rni.dashboard.active_minutes',         '5',                         'Fenêtre (minutes) au-delà de laquelle un utilisateur n''est plus compté comme connecté', false),
+  ('rni.log.expires_at',                   '',                          'Fin de validité (ISO 8601) des réglages rni.log.level / contexts / sql ; vide = permanent', false),
+  ('rni.log.updated_by',                   '',                          'Nigend de la dernière modification des réglages de journalisation', false),
+  ('rni.log.updated_at',                   '',                          'Date (ISO 8601) de la dernière modification des réglages de journalisation', false);

@@ -513,25 +513,98 @@ describe('API RNI (e2e)', () => {
     it('niveau de journalisation piloté par la base (t_param_app), appliqué à chaud', async () => {
       const set = (k: string, v: string) =>
         app.get(Db).sequelize.query('UPDATE t_param_app SET valeur = :v WHERE cle_param_app = :k', { replacements: { k, v } });
-      const settings = async () => (await as(SUPER_ADMIN).get('/admin/logs')).body;
-      expect(await settings()).toMatchObject({ level: 'log', levelSource: 'environnement', sql: false, slowMs: 1000 });
+      const applied = async () => (await as(SUPER_ADMIN).get('/admin/logs')).body.applique;
+      expect(await applied()).toMatchObject({ level: 'log', source: 'environnement', sql: false, slow_ms: 1000 });
       expect((await as(GIGN).get('/admin/logs')).status).toBe(403);
       try {
         await set('rni.log.level', 'warn');
         await set('rni.log.contexts', 'PlanningService=error, HTTP=warn, inconnu');
         await set('rni.log.slow_ms', '2500');
         // Propagé par la notification PostgreSQL (aucun redémarrage)
-        await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'warn', levelSource: 'base', slowMs: 2500 }), { timeout: 3000, interval: 50 });
-        expect((await settings()).contexts).toEqual({ PlanningService: 'error', HTTP: 'warn' });
+        await vi.waitFor(async () => expect(await applied()).toMatchObject({ level: 'warn', source: 'base', slow_ms: 2500 }), { timeout: 3000, interval: 50 });
+        expect((await applied()).contexts).toEqual({ PlanningService: 'error', HTTP: 'warn' });
         // Valeur invalide : retour au niveau de la variable d'environnement
         await set('rni.log.level', 'bavard');
-        await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'log', levelSource: 'environnement' }), { timeout: 3000, interval: 50 });
+        await vi.waitFor(async () => expect(await applied()).toMatchObject({ level: 'log', source: 'environnement' }), { timeout: 3000, interval: 50 });
       } finally {
         await set('rni.log.level', '');
         await set('rni.log.contexts', '');
         await set('rni.log.slow_ms', '1000');
       }
-      await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'log', contexts: {}, slowMs: 1000 }), { timeout: 3000, interval: 50 });
+      await vi.waitFor(async () => expect(await applied()).toMatchObject({ level: 'log', contexts: {}, slow_ms: 1000 }), { timeout: 3000, interval: 50 });
+    });
+
+    describe('écran de réglage de la journalisation', () => {
+      const body = { level: '', contexts: [], sql: false, slow_ms: 1000, db_level: 'log', retention_days: 14, metrics_retention_days: 30, duree_min: null };
+      afterAll(async () => {
+        await as(SUPER_ADMIN).put('/admin/logs', body);
+      });
+
+      it('valide les valeurs', async () => {
+        for (const bad of [
+          { level: 'bavard' },
+          { contexts: [{ contexte: 'Planning Service', niveau: 'debug' }] },
+          { contexts: [{ contexte: 'HTTP', niveau: 'fatal' }] },
+          { slow_ms: 10 },
+          { db_level: 'verbose' },
+          { retention_days: 0 },
+          { duree_min: 7 },
+        ]) {
+          const r = await as(SUPER_ADMIN).put('/admin/logs', { ...body, ...bad });
+          expect(r.status, JSON.stringify(bad)).toBe(400);
+          expect(r.body.code).toBe('RNI-1002');
+        }
+        expect((await as(GIGN).put('/admin/logs', body)).status).toBe(403);
+      });
+
+      it('enregistre, applique immédiatement et trace (auteur, avant → après)', async () => {
+        const r = await as(SUPER_ADMIN).put('/admin/logs', {
+          ...body,
+          level: 'warn',
+          contexts: [{ contexte: 'PlanningService', niveau: 'debug' }, { contexte: 'HTTP', niveau: 'error' }, { contexte: 'PlanningService', niveau: 'verbose' }],
+          slow_ms: 800,
+          retention_days: 7,
+          duree_min: 60,
+        });
+        expect(r.status).toBe(200);
+        expect(r.body.enregistre).toMatchObject({
+          level: 'warn',
+          contexts: [{ contexte: 'HTTP', niveau: 'error' }, { contexte: 'PlanningService', niveau: 'verbose' }],
+          slow_ms: 800,
+          retention_days: 7,
+          expire: false,
+        });
+        const expires = new Date(r.body.enregistre.expires_at).getTime();
+        expect(expires - Date.now()).toBeGreaterThan(55 * 60_000);
+        expect(r.body.applique).toMatchObject({ level: 'warn', source: 'base', contexts: { HTTP: 'error', PlanningService: 'verbose' }, slow_ms: 800 });
+        expect(r.body.derniere_modification).toMatchObject({ par: SUPER_ADMIN, nom: expect.stringContaining('ROBERT') });
+        expect(r.body.contextes_connus).toEqual(expect.arrayContaining(['HTTP', 'PlanningService', 'SQL']));
+        await app.get(LogPersistService).flush();
+        const trace = (await as(SUPER_ADMIN).get('/admin/journal?contexte=Audit&q=admin.logs')).body.items[0];
+        expect(trace.message).toContain(`nigend_connected=${SUPER_ADMIN}`);
+        expect(trace.message).toContain('slow_ms: 1000 → 800');
+      });
+
+      it('réglage temporaire : retour automatique aux valeurs par défaut à l’échéance', async () => {
+        await as(SUPER_ADMIN).put('/admin/logs', { ...body, level: 'warn', sql: true, duree_min: 15 });
+        // Échéance dépassée (simulée) : chaque processus revient aux défauts et la base est nettoyée
+        await app.get(Db).sequelize.query(`UPDATE t_param_app SET valeur = :v WHERE cle_param_app = 'rni.log.expires_at'`, {
+          replacements: { v: new Date(Date.now() - 1000).toISOString() },
+        });
+        await vi.waitFor(
+          async () => {
+            const d = (await as(SUPER_ADMIN).get('/admin/logs')).body;
+            expect(d.applique).toMatchObject({ level: 'log', source: 'environnement', sql: false });
+            expect(d.enregistre).toMatchObject({ level: '', sql: false, expires_at: null });
+          },
+          { timeout: 4000, interval: 100 },
+        );
+      });
+
+      it('réglage sans effet verbeux : pas d’échéance', async () => {
+        const r = await as(SUPER_ADMIN).put('/admin/logs', { ...body, slow_ms: 1500, duree_min: 15 });
+        expect(r.body.enregistre.expires_at).toBeNull();
+      });
     });
 
     it('test de vie mutualisé (pas d’appels externes à chaque requête publique)', async () => {
@@ -647,7 +720,7 @@ describe('API RNI (e2e)', () => {
       expect(nigends).toEqual(expect.arrayContaining([REFERENT_IDF, NEGO_IDF]));
       expect(d.connectes.find((c: { nigend: string }) => c.nigend === REFERENT_IDF)).toMatchObject({ nom: expect.any(String), libelle_profil: expect.any(String) });
       expect(d.metier.comptes_actifs).toBeGreaterThan(50);
-      expect(d.systeme).toMatchObject({ pid: process.pid, base: { migration: expect.stringMatching(/^2\.6\.0/) } });
+      expect(d.systeme).toMatchObject({ pid: process.pid, base: { migration: expect.stringMatching(/^\d+\.\d+\.\d+-/) } });
       expect(d.systeme.cache.ecoute).toBe(true);
     });
 

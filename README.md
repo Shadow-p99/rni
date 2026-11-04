@@ -292,7 +292,25 @@ production, une ligne par événement, avec le pid du worker.
 | `debug` | Lectures avec volumes et durées (calendrier, carte, compteurs, listes), refus métier détaillés, appels externes, accès HTTP en lecture, rechargements de paramètres, notifications de cache |
 | `verbose` | Chargements du cache, authentification de chaque requête, contrôles de droits, sondes |
 
-**Réglage depuis la base**, à chaud, sans redémarrage : tous les workers et tous les serveurs
+**Réglage depuis l'interface.** Super administrateur : **Administration → Réglages des journaux**
+(`/rni/administration/journalisation`, `GET` / `PUT /rni/api/admin/logs`).
+
+L'écran permet de régler :
+- le niveau général ;
+- le niveau par service, avec les contextes rencontrés dans le journal en suggestion ;
+- le journal SQL ;
+- le seuil de lenteur ;
+- le niveau conservé en base et la durée de conservation du journal et des métriques.
+
+Un réglage détaillé (niveau, par service, SQL) reçoit une **durée de validité** (15 min, 1 h, 4 h
+ou permanent). Passé ce délai, chaque processus revient seul aux valeurs par défaut, et l'un d'eux
+nettoie la base (verrou PostgreSQL). On n'oublie donc pas un mode débogage en production.
+
+Le panneau « Actuellement appliqué » montre l'effet réel et la dernière modification (qui, quand).
+Chaque enregistrement est tracé dans le journal, avec les valeurs avant et après (contexte
+`Audit`, `admin.logs`).
+
+**Réglage depuis la base** (équivalent, par exemple en script), à chaud, sans redémarrage : tous les workers et tous les serveurs
 appliquent la modification en quelques millisecondes (notification PostgreSQL), et au plus tard
 en 60 s.
 
@@ -302,6 +320,7 @@ en 60 s.
 | `rni.log.contexts` | `PlanningService=debug,HTTP=warn` | Niveau propre à certains contextes, plus bavard ou plus discret que le global |
 | `rni.log.sql` | `true` / `false` | Chaque requête SQL en `debug` (contexte `SQL`), avec sa durée |
 | `rni.log.slow_ms` | `1000` | Seuil des requêtes HTTP et SQL signalées comme lentes (`warn`) |
+| `rni.log.expires_at` | date ISO ou vide | Fin de validité des trois réglages ci-dessus (vide : permanent) |
 
 ```sql
 -- Diagnostiquer le planning sans inonder le reste

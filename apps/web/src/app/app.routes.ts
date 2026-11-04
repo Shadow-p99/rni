@@ -60,6 +60,12 @@ export const routes: Routes = [
             loadComponent: () => import('./features/admin/journal/journal-page').then((m) => m.JournalPage),
           },
           {
+            path: 'journalisation',
+            title: 'Réglages des journaux — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/log-settings/log-settings-page').then((m) => m.LogSettingsPage),
+          },
+          {
             path: 'perimetres',
             title: 'Périmètres — Administration RNI',
             canDeactivate: [unsavedChangesGuard],

@@ -1,10 +1,10 @@
 import { Body, Controller, Delete, Get, HttpCode, Put, Query } from '@nestjs/common';
-import type { AppLogLevel } from '@rni/shared';
+import { LOG_CONTEXT_PATTERN, LOG_DB_THRESHOLDS, LOG_DURATIONS, LOG_THRESHOLDS, MAX_LOG_CONTEXTS, type AppLogLevel, type LogContextLevel, type LogSettingsUpdateDto, type LogThreshold } from '@rni/shared';
 import { NoAudit } from '../../common/auth/decorators.js';
 import { DashboardService } from './dashboard.service.js';
 import { PERIMETRES, PERIMETRE_MODULES, Profil, type Perimetre, type PerimetreModule, type PerimetreUpdateDto } from '@rni/shared';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsIn, IsInt, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, Matches, Max, Min, ValidateNested } from 'class-validator';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { Profiles } from '../../common/auth/decorators.js';
@@ -12,7 +12,7 @@ import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheNotifyService } from '../../common/cache/cache-notify.service.js';
 import { CacheService, CacheTag } from '../../common/cache/cache.service.js';
-import { LogParam, LogSettingsService } from '../../common/logging/log-settings.service.js';
+import { LogSettingsService } from '../../common/logging/log-settings.service.js';
 
 class PerimetreItem {
   @IsInt()
@@ -31,6 +31,50 @@ class PerimetreUpdateBody implements PerimetreUpdateDto {
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
   items: PerimetreItem[];
+}
+
+class LogContextItem implements LogContextLevel {
+  @Matches(LOG_CONTEXT_PATTERN, { message: 'Contexte invalide (lettres, chiffres, . _ -).' })
+  contexte: string;
+
+  @IsIn(LOG_THRESHOLDS)
+  niveau: LogThreshold;
+}
+
+class LogSettingsBody implements LogSettingsUpdateDto {
+  @IsIn(['', ...LOG_THRESHOLDS])
+  level: LogThreshold | '';
+
+  @IsArray()
+  @ArrayMaxSize(MAX_LOG_CONTEXTS)
+  @ValidateNested({ each: true })
+  @Type(() => LogContextItem)
+  contexts: LogContextItem[];
+
+  @IsBoolean()
+  sql: boolean;
+
+  @IsInt()
+  @Min(50)
+  @Max(600_000)
+  slow_ms: number;
+
+  @IsIn(LOG_DB_THRESHOLDS)
+  db_level: LogThreshold;
+
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  retention_days: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(3650)
+  metrics_retention_days: number;
+
+  @IsOptional()
+  @IsIn(LOG_DURATIONS.filter((d) => d != null))
+  duree_min: number | null;
 }
 
 /** Administration (super administrateur) : périmètres de visualisation par profil et par module. */
@@ -68,13 +112,25 @@ export class AdminController {
     return this.dashboardService.journal({ niveau, contexte, q, request_id, nigend, avant: avant ? Number(avant) : undefined, limite: limite ? Number(limite) : undefined });
   }
 
-  /**
-   * Réglages de journalisation appliqués par le processus qui répond. Ils se modifient dans
-   * `t_param_app` (clés rni.log.*), pris en compte à chaud par tous les processus.
-   */
+  /** Réglages de journalisation : valeurs enregistrées, appliquées, par défaut, contextes connus. */
   @Get('logs')
+  @NoAudit()
   logSettings() {
-    return { pid: process.pid, ...this.logs.settings, parametres: Object.values(LogParam) };
+    return this.logs.describe();
+  }
+
+  /**
+   * Modifie les réglages de journalisation : appliqués immédiatement par toutes les instances
+   * (notification PostgreSQL) ; tracé (auteur, valeurs avant / après).
+   */
+  @Put('logs')
+  async updateLogSettings(@CurrentUser() user: RniUser, @Body() body: LogSettingsBody) {
+    const { before, after } = await this.logs.update({ ...body, duree_min: body.duree_min ?? null }, user.nigend);
+    const changes = (Object.keys(after) as (keyof typeof after)[])
+      .filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]))
+      .map((k) => `${k}: ${JSON.stringify(before[k])} → ${JSON.stringify(after[k])}`);
+    this.adminLog.trace('admin.logs', user.nigend, { modifications: changes, duree_min: body.duree_min ?? null });
+    return this.logs.describe();
   }
 
   /** Exploitation : état du cache applicatif (entrées, taux de succès, invalidations). */
