@@ -46,7 +46,11 @@ export class CacheNotifyService implements OnApplicationBootstrap, OnApplication
 
   /** Diffuse une invalidation à tous les processus (actions d'exploitation). */
   async broadcast(payload: { tags?: CacheTag[]; clear?: boolean }): Promise<void> {
-    if (!this.enabled || !this.client || !this.connected) return;
+    if (!this.enabled || !this.client || !this.connected) {
+      this.logger.warn('Diffusion de l’invalidation impossible : écoute PostgreSQL inactive (seul ce processus est purgé).');
+      return;
+    }
+    this.logger.log(`Diffusion à tous les processus : ${payload.clear ? 'purge complète' : payload.tags?.join(', ')}`);
     await this.client.query('SELECT pg_notify($1, $2)', [CACHE_CHANNEL, JSON.stringify(payload)]).catch((e: Error) => {
       this.logger.warn(`Diffusion de l'invalidation impossible : ${e.message}`);
     });
@@ -95,6 +99,7 @@ export class CacheNotifyService implements OnApplicationBootstrap, OnApplication
     this.received++;
     try {
       const p = JSON.parse(payload ?? '{}') as { tags?: string[]; clear?: boolean };
+      this.logger.debug(`Notification reçue : ${p.clear ? 'purge complète' : (p.tags ?? []).join(', ')}`);
       if (p.clear) return this.cache.clear();
       const tags = (p.tags ?? []).filter((t): t is CacheTag => TAGS.has(t));
       if (tags.length) this.cache.invalidate(...tags);

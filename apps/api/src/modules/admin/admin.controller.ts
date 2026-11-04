@@ -9,6 +9,7 @@ import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheNotifyService } from '../../common/cache/cache-notify.service.js';
 import { CacheService, CacheTag } from '../../common/cache/cache.service.js';
+import { LogParam, LogSettingsService } from '../../common/logging/log-settings.service.js';
 
 class PerimetreItem {
   @IsInt()
@@ -38,7 +39,17 @@ export class AdminController {
     private readonly adminLog: AdminLogService,
     private readonly cache: CacheService,
     private readonly notify: CacheNotifyService,
+    private readonly logs: LogSettingsService,
   ) {}
+
+  /**
+   * Réglages de journalisation appliqués par le processus qui répond. Ils se modifient dans
+   * `t_param_app` (clés rni.log.*), pris en compte à chaud par tous les processus.
+   */
+  @Get('logs')
+  logSettings() {
+    return { pid: process.pid, ...this.logs.settings, parametres: Object.values(LogParam) };
+  }
 
   /** Exploitation : état du cache applicatif (entrées, taux de succès, invalidations). */
   @Get('cache')

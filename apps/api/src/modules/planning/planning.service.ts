@@ -97,6 +97,7 @@ export class PlanningService {
     const jours = await this.params.joursGlissants();
     const min = minPlanningDate(new Date(), jours);
     if (existing.date_debut < min) {
+      this.logger.debug(`Plage commençant le ${existing.date_debut} non ${action} : planning figé avant le ${min}`);
       throw new BusinessException(
         ErrorCode.INSERTION_INTERDITE,
         `${frozenMessage(min, jours)} Cette plage ne peut pas être ${action} en entier : modifiez ou supprimez seulement les créneaux à partir du ${min.split('-').reverse().join('/')}.`,
@@ -149,6 +150,7 @@ export class PlanningService {
     const end = toSlot(bounds.last, 2);
     const positions = positionList ? new Set(positionList) : null;
     const filtered = terms.length > 0 || positions != null;
+    const t0 = Date.now();
 
     let users = await this.repo.planningUsers(regions, { terms });
     if (positions) {
@@ -189,6 +191,9 @@ export class PlanningService {
       });
     }
     const out = [...byRegion.values()];
+    this.logger.debug(
+      `Calendrier ${month} calculé : régions ${regions?.join(',') ?? 'toutes'}${filtered ? `, filtre (${terms.length} mot(s), positions ${positionList?.join(',') ?? '-'}) → ${matches} agent(s)` : ''}, ${users.length} agent(s), ${plannings.length} plage(s) en ${Date.now() - t0} ms`,
+    );
     return filtered
       ? { month, ...bounds, regions: out.filter((r) => r.users.length), filter: { matches, truncated: matches > users.length } }
       : { month, ...bounds, regions: out };
@@ -271,6 +276,7 @@ export class PlanningService {
   }
 
   private async loadGeojson(user: RniUser, now: Date): Promise<PersonnelCollection> {
+    const t0 = Date.now();
     const [current, positions, geoloc] = await Promise.all([
       // La carte a son propre périmètre (BR-AUTH-6 paramétrable)
       this.currentPositions(user.perimetres.carte, now),
@@ -311,6 +317,10 @@ export class PlanningService {
       };
       features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [point.x, point.y] }, properties: props });
     }
+    this.logger.debug(
+      `Carte calculée : régions ${user.perimetres.carte?.join(',') ?? 'toutes'}, ${current.length} agent(s), ${features.length} point(s) dont ${features.filter((f) => f.properties.adresse_type === 'localisation').length} géolocalisé(s), ${geoloc.length} position(s) GEOLOC, en ${Date.now() - t0} ms`,
+    );
+    if (features.length < current.length) this.logger.verbose(`Carte : ${current.length - features.length} agent(s) sans coordonnées (unité non géocodée)`);
     return { type: 'FeatureCollection', features };
   }
 
@@ -332,7 +342,10 @@ export class PlanningService {
   private async target(current: RniUser, nigend: string | undefined): Promise<UserPlanningRow> {
     if (!nigend) throw BusinessException.missing('nigend');
     const [target] = await this.repo.planningUsers(null, { nigend });
-    if (!target) throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU, `Aucun personnel planifiable pour le nigend ${nigend}.`);
+    if (!target) {
+      this.logger.warn(`Écriture refusée (${current.nigend}) : aucun personnel planifiable pour le nigend ${nigend}.`);
+      throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU, `Aucun personnel planifiable pour le nigend ${nigend}.`);
+    }
     this.assertCanWrite(current, target);
     return target;
   }
@@ -373,6 +386,7 @@ export class PlanningService {
     const overlaps = await this.repo.overlapping(idUser, start, end, exclude);
     if (overlaps.length) {
       const o = overlaps[0];
+      this.logger.debug(`Chevauchement refusé pour l'agent ${idUser} : ${periode(bounds)} recoupe la plage ${o.id_planning} (${periode(o)})`);
       throw new BusinessException(
         ErrorCode.CHEVAUCHEMENT,
         `Plage existante du ${o.date_debut} (${o.id_creneaux_debut === 1 ? 'Jour' : 'Nuit'}) au ${o.date_fin} (${o.id_creneaux_fin === 1 ? 'Jour' : 'Nuit'}).`,
@@ -383,7 +397,10 @@ export class PlanningService {
   async create(current: RniUser, dto: PlanningInputDto): Promise<PlanningDto> {
     const target = await this.target(current, dto.nigend);
     const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service);
-    if (v) throw BusinessException.from(v);
+    if (v) {
+      this.logger.debug(`Création refusée (${current.nigend} → ${target.nigend}, ${periode(dto)}) : ${v.code} ${v.message}`);
+      throw BusinessException.from(v);
+    }
     await this.assertPosition(dto.id_pos_service);
     if (dto.ecraser) return this.createOverwriting(current, target, dto);
     await this.assertNoOverlap(target.id_user, dto);
@@ -398,6 +415,7 @@ export class PlanningService {
       created_by: current.nigend,
       updated_by: current.nigend,
     });
+    this.logger.log(`Planning ${created.id_planning} créé par ${current.nigend} pour ${target.nigend} : ${periode(dto)}, position ${dto.id_pos_service}`);
     return this.get(created.id_planning);
   }
 
@@ -437,6 +455,9 @@ export class PlanningService {
         { transaction },
       );
       if (removed.length) this.adminLog.trace('planning.overwrite', current.nigend, { nigend: target.nigend, ecrasees: removed, conservees: kept });
+      this.logger.log(
+        `Planning ${created.id_planning} créé par ${current.nigend} pour ${target.nigend} avec écrasement : ${periode(dto)}, position ${dto.id_pos_service} (${removed.length} plage(s) écrasée(s), ${kept} partie(s) conservée(s))`,
+      );
       return created.id_planning;
     });
     return this.get(id);
@@ -455,6 +476,7 @@ export class PlanningService {
     return this.db.transaction(async (transaction) => {
       const { removed, kept } = await this.clearPeriodTx(current, target, start, end, transaction, 'supprimée');
       if (removed.length) this.adminLog.trace('planning.clear', current.nigend, { nigend: target.nigend, periode: dto, supprimees: removed, conservees: kept });
+      else this.logger.debug(`Suppression de période sans effet (${current.nigend} → ${target.nigend}, ${periode(dto)}) : aucun planning`);
       return { supprimees: removed.length, conservees: kept };
     });
   }
@@ -474,7 +496,10 @@ export class PlanningService {
     const overlaps = await this.repo.overlapping(target.id_user, start, end, [], transaction, true);
     for (const o of overlaps) {
       const v = checkPositionAllowed(current.id_profil, null, o.id_pos_service);
-      if (v) throw BusinessException.from({ ...v, message: `${v.message} Une plage existante ne peut pas être ${verbe}.` });
+      if (v) {
+        this.logger.warn(`Plage ${o.id_planning} (position ${o.id_pos_service}) non ${verbe} : réservée aux référents et au GIGN (${current.nigend}, profil ${current.id_profil}).`);
+        throw BusinessException.from({ ...v, message: `${v.message} Une plage existante ne peut pas être ${verbe}.` });
+      }
     }
     const pieces = overlaps.flatMap((o) =>
       splitAround(o, start, end).map((p) => ({ ...p, adresse_temp: o.adresse_temp, x_adresse_temp: o.x_adresse_temp, y_adresse_temp: o.y_adresse_temp })),
@@ -509,7 +534,10 @@ export class PlanningService {
     const target = await this.target(current, existing.nigend);
     await this.assertNotFrozen(existing, 'modifiée');
     const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service, existing.id_pos_service);
-    if (v) throw BusinessException.from(v);
+    if (v) {
+      this.logger.debug(`Modification du planning ${id} refusée (${current.nigend}) : ${v.code} ${v.message}`);
+      throw BusinessException.from(v);
+    }
     await this.assertPosition(dto.id_pos_service);
     await this.assertNoOverlap(target.id_user, dto, [id]);
     await this.plannings.update(
@@ -524,6 +552,9 @@ export class PlanningService {
       },
       { where: { id_planning: id } },
     );
+    this.logger.log(
+      `Planning ${id} modifié par ${current.nigend} pour ${existing.nigend} : ${periode(existing)} position ${existing.id_pos_service} → ${periode(dto)} position ${dto.id_pos_service}`,
+    );
     return this.get(id);
   }
 
@@ -536,7 +567,7 @@ export class PlanningService {
     if (v) throw BusinessException.from(v);
     await this.assertNotFrozen(existing, 'supprimée');
     await this.plannings.destroy({ where: { id_planning: id } });
-    this.adminLog.trace('planning.delete', current.nigend, { id_planning: id, nigend: existing.nigend });
+    this.adminLog.trace('planning.delete', current.nigend, { id_planning: id, nigend: existing.nigend, periode: periode(existing), position: existing.id_pos_service });
   }
 
   /**
@@ -556,7 +587,10 @@ export class PlanningService {
       if (v) throw BusinessException.from(v);
       await this.assertPosition(dto.id_pos_service);
       const result = computeInsertion(outer, dto, new Date(), jours);
-      if (!result.ok) throw BusinessException.from(result.violation);
+      if (!result.ok) {
+        this.logger.debug(`Insertion refusée dans le planning ${outer.id_planning} (${current.nigend}, ${periode(dto)}) : ${result.violation.code} ${result.violation.message}`);
+        throw BusinessException.from(result.violation);
+      }
 
       const keep = { adresse_temp: outer.adresse_temp, x_adresse_temp: outer.x_adresse_temp, y_adresse_temp: outer.y_adresse_temp };
       const inserted = dto.x_adresse_temp != null && dto.y_adresse_temp != null && dto.adresse_temp ? this.address(dto, target) : keep;
@@ -581,6 +615,9 @@ export class PlanningService {
         ids.push(created.id_planning);
       }
       const rows = await Promise.all(ids.map((i) => this.repo.findById(i, transaction)));
+      this.logger.log(
+        `Insertion dans le planning ${outer.id_planning} par ${current.nigend} pour ${outer.nigend} : ${periode(dto)} position ${dto.id_pos_service} → plages ${ids.join(', ')} (${result.pieces.map((p) => p.role).join(' / ')})`,
+      );
       return rows.map((r) => strip(r!));
     });
   }
@@ -598,6 +635,7 @@ export class PlanningService {
     const start = toSlot(from, 1);
     const end = toSlot(to, 2);
     const plannings = await this.repo.planningsBetween(start, end, regions);
+    this.logger.debug(`Compteurs journaliers ${from} → ${to} : régions ${regions?.join(',') ?? 'toutes'}, ${plannings.length} plage(s)`);
     return days.map((date) => {
       const creneaux: Record<number, { total: Record<number, number>; byRegion: Record<number, Record<number, number>> }> = {};
       for (const cr of [1, 2]) {
@@ -615,6 +653,12 @@ export class PlanningService {
       return { date, creneaux };
     });
   }
+}
+
+/** Période lisible pour les journaux : `2026-11-04 J → 2026-11-06 N`. */
+function periode(p: Partial<PlageBounds>): string {
+  const c = (v?: number) => (v === 1 ? 'J' : v === 2 ? 'N' : '?');
+  return `${p.date_debut} ${c(p.id_creneaux_debut)} → ${p.date_fin} ${c(p.id_creneaux_fin)}`;
 }
 
 function strip(p: PlanningRow & { id_region?: number | null }): PlanningDto {

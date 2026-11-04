@@ -11,6 +11,8 @@ function call(mw: RequestContextMiddleware, url: string, headers: Record<string,
   const req = { originalUrl: url, method: 'GET', ip: '10.0.0.1', headers: { ...headers } } as unknown as RequestWithId;
   const res = { headers: {} as Record<string, string>, statusCode: 200, body: null as unknown };
   const r = {
+    once: vi.fn(),
+    getHeader: () => undefined,
     setHeader: (k: string, v: string) => (res.headers[k.toLowerCase()] = v),
     status: (s: number) => ((res.statusCode = s), r),
     json: (b: unknown) => (res.body = b),

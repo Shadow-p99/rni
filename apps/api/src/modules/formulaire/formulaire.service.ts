@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { ErrorCode, FORMULAIRE_FIELDS, FormulaireDto, FormulaireFilter, hasNameOrFirstName, isIsoDate, isNationalAdmin } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
@@ -20,6 +20,9 @@ const SELECT = `
 
 @Injectable()
 export class FormulaireService {
+  // Fiches de crise : seuls identifiants et métadonnées sont journalisés, jamais le contenu (données personnelles).
+  private readonly logger = new Logger(FormulaireService.name);
+
   constructor(
     private readonly db: Db,
     private readonly adminLog: AdminLogService,
@@ -41,16 +44,21 @@ export class FormulaireService {
     if (filter.closed != null) where.push('f.is_closed = :closed');
     if (filter.from) where.push(`f.updated_at >= (:from::date)::timestamp AT TIME ZONE 'Europe/Paris'`);
     if (filter.to) where.push(`f.updated_at < ((:to::date) + 1)::timestamp AT TIME ZONE 'Europe/Paris'`);
-    return this.db.select<FormulaireDto>(
+    const rows = await this.db.select<FormulaireDto>(
       `${SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY f.updated_at DESC`,
       { region, closed: filter.closed, from: filter.from, to: filter.to },
     );
+    this.logger.debug(
+      `Fiches de crise (${user.nigend}) : région ${region ?? 'toutes'}, clôturées ${filter.closed ?? 'toutes'}, ${filter.from ?? '…'} → ${filter.to ?? '…'} : ${rows.length} fiche(s)`,
+    );
+    return rows;
   }
 
   async get(user: RniUser, id: number): Promise<FormulaireDto> {
     const row = await this.db.one<FormulaireDto>(`${SELECT} WHERE f.id_formulaire = :id`, { id });
     if (!row) throw BusinessException.notFound('Fiche introuvable.');
     if (!isNationalAdmin(user.id_profil) && row.auteur_id_region !== user.id_region) {
+      this.logger.warn(`Fiche ${id} (région ${row.auteur_id_region}) refusée à ${user.nigend} (région ${user.id_region}) : hors périmètre.`);
       throw new BusinessException(ErrorCode.HORS_PERIMETRE, undefined, 403);
     }
     return row;
@@ -60,18 +68,23 @@ export class FormulaireService {
   async create(user: RniUser, body: unknown): Promise<FormulaireDto> {
     const content = sanitizeFormulaire(body, 'create');
     const created = await this.formulaires.create({ ...content, id_user: user.id_user, is_closed: false });
+    this.logger.log(`Fiche de crise ${created.id_formulaire} créée par ${user.nigend} (${Object.keys(content).length} champ(s) renseigné(s))`);
     return this.get(user, created.id_formulaire);
   }
 
   /** BR-FOR-5 : une fiche clôturée n'est plus modifiable. */
   async update(user: RniUser, id: number, body: unknown): Promise<FormulaireDto> {
     const current = await this.get(user, id);
-    if (current.is_closed) throw new BusinessException(ErrorCode.FICHE_INALTERABLE, 'Fiche clôturée.');
+    if (current.is_closed) {
+      this.logger.warn(`Modification refusée : fiche ${id} clôturée (${user.nigend}).`);
+      throw new BusinessException(ErrorCode.FICHE_INALTERABLE, 'Fiche clôturée.');
+    }
     const content = sanitizeFormulaire(body, 'update');
     const nom = ('nom' in content ? content['nom'] : current['nom']) as string | null;
     const prenom = ('prenom' in content ? content['prenom'] : current['prenom']) as string | null;
     if (!hasNameOrFirstName(nom, prenom)) throw BusinessException.invalid('Le nom ou le prénom de l’individu est obligatoire.');
     await this.formulaires.update({ ...content }, { where: { id_formulaire: id, is_closed: false } });
+    this.logger.log(`Fiche de crise ${id} modifiée par ${user.nigend} (champs : ${Object.keys(content).join(', ') || 'aucun'})`);
     return this.get(user, id);
   }
 

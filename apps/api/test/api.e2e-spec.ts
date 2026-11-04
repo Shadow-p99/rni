@@ -504,6 +504,30 @@ describe('API RNI (e2e)', () => {
       expect(tt.headers['cache-control']).toBe('private, no-cache');
       expect(tt.headers.etag).toBeTruthy();
     });
+    it('niveau de journalisation piloté par la base (t_param_app), appliqué à chaud', async () => {
+      const set = (k: string, v: string) =>
+        app.get(Db).sequelize.query('UPDATE t_param_app SET valeur = :v WHERE cle_param_app = :k', { replacements: { k, v } });
+      const settings = async () => (await as(SUPER_ADMIN).get('/admin/logs')).body;
+      expect(await settings()).toMatchObject({ level: 'log', levelSource: 'environnement', sql: false, slowMs: 1000 });
+      expect((await as(GIGN).get('/admin/logs')).status).toBe(403);
+      try {
+        await set('rni.log.level', 'warn');
+        await set('rni.log.contexts', 'PlanningService=error, HTTP=warn, inconnu');
+        await set('rni.log.slow_ms', '2500');
+        // Propagé par la notification PostgreSQL (aucun redémarrage)
+        await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'warn', levelSource: 'base', slowMs: 2500 }), { timeout: 3000, interval: 50 });
+        expect((await settings()).contexts).toEqual({ PlanningService: 'error', HTTP: 'warn' });
+        // Valeur invalide : retour au niveau de la variable d'environnement
+        await set('rni.log.level', 'bavard');
+        await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'log', levelSource: 'environnement' }), { timeout: 3000, interval: 50 });
+      } finally {
+        await set('rni.log.level', '');
+        await set('rni.log.contexts', '');
+        await set('rni.log.slow_ms', '1000');
+      }
+      await vi.waitFor(async () => expect(await settings()).toMatchObject({ level: 'log', contexts: {}, slowMs: 1000 }), { timeout: 3000, interval: 50 });
+    });
+
     it('test de vie mutualisé (pas d’appels externes à chaque requête publique)', async () => {
       const a = await request(app.getHttpServer()).get('/rni/api/service/testvie');
       const b = await request(app.getHttpServer()).get('/rni/api/service/testvie');

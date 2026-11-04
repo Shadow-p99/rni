@@ -276,6 +276,53 @@ Mesures sur 5 100 personnels et 121 000 plannings (médiane, sur la même machin
 | 50 cartes rafraîchies simultanément | 1 778 ms | 254 ms |
 
 
+## Journalisation
+
+L'API journalise avec le `Logger` de NestJS : une instance par service, et le nom du service sert
+de **contexte** (`PlanningService`, `UsersService`, `HTTP`, `SQL`…). Les journaux sortent en JSON en
+production, une ligne par événement, avec le pid du worker.
+
+**Niveaux** (du plus discret au plus bavard : `error`, `warn`, `log`, `debug`, `verbose`) :
+
+| Niveau | Contenu |
+|---|---|
+| `error` | Erreurs techniques (500) avec pile, paramètre obligatoire absent |
+| `warn` | Refus d'accès (401 / 403, hors périmètre), service externe en échec, requête HTTP ou SQL lente, plage Alerte / Formateur protégée, sonde en échec, simulations actives |
+| `log` | Écritures : plannings (création, écrasement, modification, insertion, suppression), comptes, fiches de crise, appareils NEO, périmètres, purge du cache ; accès HTTP en écriture ; démarrage / arrêt |
+| `debug` | Lectures avec volumes et durées (calendrier, carte, compteurs, listes), refus métier détaillés, appels externes, accès HTTP en lecture, rechargements de paramètres, notifications de cache |
+| `verbose` | Chargements du cache, authentification de chaque requête, contrôles de droits, sondes |
+
+**Réglage depuis la base**, à chaud, sans redémarrage : tous les workers et tous les serveurs
+appliquent la modification en quelques millisecondes (notification PostgreSQL), et au plus tard
+en 60 s.
+
+| Clé `t_param_app` | Valeur | Effet |
+|---|---|---|
+| `rni.log.level` | `error` · `warn` · `log` · `debug` · `verbose` · vide | Niveau global (vide ou invalide : variable `LOG_LEVEL`) |
+| `rni.log.contexts` | `PlanningService=debug,HTTP=warn` | Niveau propre à certains contextes, plus bavard ou plus discret que le global |
+| `rni.log.sql` | `true` / `false` | Chaque requête SQL en `debug` (contexte `SQL`), avec sa durée |
+| `rni.log.slow_ms` | `1000` | Seuil des requêtes HTTP et SQL signalées comme lentes (`warn`) |
+
+```sql
+-- Diagnostiquer le planning sans inonder le reste
+UPDATE t_param_app SET valeur = 'PlanningService=debug,SQL=debug' WHERE cle_param_app = 'rni.log.contexts';
+UPDATE t_param_app SET valeur = 'true' WHERE cle_param_app = 'rni.log.sql';
+-- Retour à la normale
+UPDATE t_param_app SET valeur = '' WHERE cle_param_app = 'rni.log.contexts';
+UPDATE t_param_app SET valeur = 'false' WHERE cle_param_app = 'rni.log.sql';
+```
+
+`GET /rni/api/admin/logs` (super administrateur) affiche les réglages appliqués par le processus
+qui répond. Chaque changement est aussi tracé dans le journal (`LogSettingsService`).
+
+**Données protégées.** Ne sont jamais journalisés :
+- les paramètres de requête des URL ;
+- les valeurs liées des requêtes SQL ;
+- les jetons des services externes (masqués) ;
+- le contenu des fiches de crise ;
+- les adresses géocodées ;
+- les valeurs du téléphone personnel et du commentaire (seul le nom des champs modifiés apparaît).
+
 ## Dette technique du §9 : traitement
 
 | # | Point | Traitement |
@@ -363,7 +410,7 @@ Variables d'environnement (toutes validées au démarrage ; une erreur arrête l
 | `PROXY_SHARED_SECRET` | — | si défini, seules les requêtes portant `X-RNI-Proxy-Secret` (ajouté par Nginx) sont acceptées |
 | `TRUST_PROXY` | `loopback` | sauts de proxy crus pour `X-Forwarded-For` (journal d'audit) |
 | `CORS_ORIGINS` | dév. : `http://localhost:4200` ; prod : aucune | origines croisées autorisées |
-| `LOG_FORMAT` / `LOG_LEVEL` | prod : `json` / `log` | journalisation sur la sortie standard |
+| `LOG_FORMAT` / `LOG_LEVEL` | prod : `json` / `log` | journalisation sur la sortie standard ; niveau par défaut, surchargé par `rni.log.level` en base |
 | `CACHE_ENABLED` `CACHE_NOTIFY` `CACHE_MAX_ENTRIES` `CACHE_MAX_MB` | `true` `true` `5000` `128` | cache applicatif |
 | `RNI_MOCK_AUTH` / `RNI_MOCK_EXTERNAL` | dév. : `true` | simulations (authentification interdite hors dév.) |
 

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Global, Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
+import { sqlLogging } from '../common/logging/sql-logger.js';
 import { APP_CONFIG, AppConfig } from '../config/configuration.js';
 import { ALL_MODELS } from './models/index.js';
 import { Db } from './db.service.js';
@@ -20,7 +21,9 @@ import { Db } from './db.service.js';
         models: ALL_MODELS,
         autoLoadModels: false,
         synchronize: false,
-        logging: cfg.db.logging ? console.log : false,
+        // Journal SQL piloté à chaud (rni.log.sql, rni.log.slow_ms) ; durée mesurée pour les requêtes lentes
+        logging: sqlLogging,
+        benchmark: true,
         dialectOptions: {
           application_name: 'rni-api',
           // JIT désactivé : sur des requêtes transactionnelles il coûte plus (compilation) qu'il ne rapporte.

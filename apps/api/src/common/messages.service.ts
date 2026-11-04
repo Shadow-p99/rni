@@ -21,6 +21,7 @@ export class MessagesService implements OnModuleInit {
       const rows = await this.messages.findAll({ raw: true });
       this.cache = new Map(rows.map((r) => [r.code_message, { libelle: r.libelle, type: r.type as MessageType }]));
       this.loadedAt = Date.now();
+      this.logger.debug(`Catalogue des messages chargé : ${rows.length} message(s)`);
     } catch (e) {
       this.logger.warn(`Catalogue des messages indisponible, repli sur les libellés intégrés : ${(e as Error).message}`);
     }

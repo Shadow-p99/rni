@@ -96,6 +96,7 @@ export class CacheService {
   private misses = 0;
   private evictions = 0;
   private readonly invalidations: Record<string, number> = {};
+  private readonly listeners: ((tags: readonly CacheTag[]) => void)[] = [];
 
   constructor(@Optional() @Inject(APP_CONFIG) cfg?: AppConfig) {
     this.enabled = cfg?.cache.enabled ?? true;
@@ -127,7 +128,9 @@ export class CacheService {
     p = (async () => {
       try {
         // Toujours asynchrone : `p` est enregistré avant toute fin (même en cas d'exception immédiate)
+        const t0 = Date.now();
         const value = await Promise.resolve().then(load);
+        this.logger.verbose(`Chargé ${key} en ${Date.now() - t0} ms`);
         const entry: Entry = { value, expires: Date.now() + ttlMs, tags, gens, bytes: sizeOf(value) };
         // Invalidé pendant le chargement : la valeur sert cet appel mais n'est pas conservée.
         if (this.fresh(entry)) this.store(key, entry);
@@ -145,6 +148,24 @@ export class CacheService {
     return this.wrap(key, ttlMs, async () => JsonPayload.of(await load()), tags);
   }
 
+  /**
+   * Abonnement aux invalidations (locales, ou reçues d'un autre processus par la notification
+   * PostgreSQL) : ex. relecture des paramètres de journalisation quand `t_param_app` change.
+   */
+  onInvalidate(listener: (tags: readonly CacheTag[]) => void): void {
+    this.listeners.push(listener);
+  }
+
+  private emit(tags: readonly CacheTag[]): void {
+    for (const l of this.listeners) {
+      try {
+        l(tags);
+      } catch (e) {
+        this.logger.warn(`Abonné à l'invalidation en erreur : ${(e as Error).message}`);
+      }
+    }
+  }
+
   /** Supprime toutes les entrées portant l'une des étiquettes. */
   invalidate(...tags: CacheTag[]): void {
     for (const t of tags) {
@@ -154,6 +175,8 @@ export class CacheService {
     for (const [k, e] of this.entries) if (e.tags.some((t) => tags.includes(t))) this.remove(k);
     // Les chargements en cours ne doivent plus être partagés avec les nouveaux appelants.
     for (const [k, f] of this.inflight) if (f.tags.some((t) => tags.includes(t))) this.inflight.delete(k);
+    this.logger.verbose(`Invalidation : ${tags.join(', ')} (${this.entries.size} entrée(s) restante(s))`);
+    this.emit(tags);
   }
 
   /** Supprime une entrée (ou toutes celles dont la clé commence par `prefix*`). */
@@ -174,6 +197,7 @@ export class CacheService {
     this.inflight.clear();
     for (const t of Object.values(CacheTag)) this.generations.set(t, (this.generations.get(t) ?? 0) + 1);
     this.logger.debug('Cache vidé.');
+    this.emit(Object.values(CacheTag));
   }
 
   stats(): CacheStats {

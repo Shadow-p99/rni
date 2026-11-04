@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { BaseLayerDto, ErrorCode, GeocodeCandidate, IsochroneCollection, NeoLineDto } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
 import type { AnyFeatureCollection, FacadeClient, GeolocClient, GeolocPosition, RemopClient } from './external.types.js';
@@ -8,6 +8,8 @@ import { ParamService } from './param.service.js';
 /** GEOLOC : géolocalisation des terminaux NEO (GeoJSON), jeton en en-tête `Token`. */
 @Injectable()
 export class HttpGeolocClient implements GeolocClient {
+  private readonly logger = new Logger('Geoloc');
+
   constructor(private readonly params: ParamService) {}
 
   private async url(): Promise<{ url: string; token: string }> {
@@ -21,11 +23,15 @@ export class HttpGeolocClient implements GeolocClient {
     const { url, token } = await this.url();
     const fc = await getJson<AnyFeatureCollection>(url, { headers: { Token: token } });
     const out: GeolocPosition[] = [];
+    let ignored = 0;
     for (const f of fc?.features ?? []) {
       const c = f.geometry?.coordinates as number[] | undefined;
       const p = f.properties ?? {};
       const indicatif = (p['indicatif'] ?? p['name'] ?? p['id']) as string | undefined;
-      if (!indicatif || !Array.isArray(c) || c.length < 2) continue;
+      if (!indicatif || !Array.isArray(c) || c.length < 2) {
+        ignored++;
+        continue;
+      }
       out.push({
         indicatif: String(indicatif),
         lng: Number(c[0]),
@@ -33,6 +39,7 @@ export class HttpGeolocClient implements GeolocClient {
         horodatage: (p['horodatage'] ?? p['date'] ?? p['timestamp'] ?? null) as string | null,
       });
     }
+    this.logger.debug(`GEOLOC : ${out.length} position(s)${ignored ? `, ${ignored} entrée(s) inexploitable(s) ignorée(s)` : ''}`);
     return out;
   }
 
@@ -44,6 +51,8 @@ export class HttpGeolocClient implements GeolocClient {
 /** REMOP : lignes NEO d'un agent, jeton en en-tête `Token`. */
 @Injectable()
 export class HttpRemopClient implements RemopClient {
+  private readonly logger = new Logger('Remop');
+
   constructor(private readonly params: ParamService) {}
 
   async lines(nigend: string): Promise<NeoLineDto[]> {
@@ -53,7 +62,11 @@ export class HttpRemopClient implements RemopClient {
     const body = await getJson<{ neo?: unknown }>(joinUrl(host, `${path}/${encodeURIComponent(nigend)}`), {
       headers: { Token: token },
     });
-    if (!Array.isArray(body?.neo)) throw new BusinessException(ErrorCode.AUCUNE_LIGNE_NEO);
+    if (!Array.isArray(body?.neo)) {
+      this.logger.debug(`REMOP : aucune ligne NEO pour ${nigend}`);
+      throw new BusinessException(ErrorCode.AUCUNE_LIGNE_NEO);
+    }
+    this.logger.debug(`REMOP : ${body.neo.length} ligne(s) NEO pour ${nigend}`);
     return body.neo.map((l: Record<string, unknown>) => ({
       id: String(l['id'] ?? l['idGeoloc'] ?? l['numero']),
       numero: String(l['numero'] ?? l['msisdn'] ?? l['id']),
@@ -69,6 +82,8 @@ export class HttpRemopClient implements RemopClient {
 /** Facade SIG : fonds cartographiques, géocodeur et isochrones ; jeton passé dans l'URL. */
 @Injectable()
 export class HttpFacadeClient implements FacadeClient {
+  private readonly logger = new Logger('Facade');
+
   constructor(private readonly params: ParamService) {}
 
   private async base(pathKey: string, code: ErrorCode) {
@@ -84,6 +99,7 @@ export class HttpFacadeClient implements FacadeClient {
     url.searchParams.set('token', token);
     const front = (await this.params.get('rni.facade.hostname.front')) ?? url.origin;
     const body = await getJson<{ baseLayers?: Partial<BaseLayerDto>[] }>(url.toString(), { proxy });
+    this.logger.debug(`Facade : ${body.baseLayers?.length ?? 0} fond(s) cartographique(s)`);
     return (body.baseLayers ?? []).map((l, i) => {
       const abs = l.url && /^https?:/.test(l.url) ? l.url : joinUrl(front, l.url ?? '');
       const withToken = new URL(abs);
@@ -114,6 +130,8 @@ export class HttpFacadeClient implements FacadeClient {
     url.searchParams.set('maxLocations', '10');
     const body = await getJson<{ candidates?: { address: string; location: { x: number; y: number }; score: number }[] }>(url.toString(), { proxy });
     if (!Array.isArray(body?.candidates)) throw new BusinessException(ErrorCode.AUCUNE_ADRESSE);
+    // L'adresse saisie n'est pas journalisée (elle peut désigner une personne)
+    this.logger.debug(`Géocodeur : ${body.candidates.length} candidat(s) pour une adresse de ${address.length} caractère(s)`);
     return body.candidates.map((c) => ({ address: c.address, x: c.location.x, y: c.location.y, score: c.score }));
   }
 
@@ -125,6 +143,7 @@ export class HttpFacadeClient implements FacadeClient {
     url.searchParams.set('timebreaks', timebreaks.join(','));
     url.searchParams.set('f', 'geojson');
     const fc = await getJson<AnyFeatureCollection>(url.toString(), { proxy, timeoutMs: 30_000 });
+    this.logger.debug(`Isochrones (${lng.toFixed(4)}, ${lat.toFixed(4)}) : ${fc.features?.length ?? 0} zone(s), paliers ${timebreaks.join('/')} min`);
     return {
       type: 'FeatureCollection',
       features: (fc.features ?? []).map((f) => ({

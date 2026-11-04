@@ -40,6 +40,7 @@ export class PerimetreService {
           const rows = await this.db.select<{ id_profil: number; module: PerimetreModule; perimetre: Perimetre }>(
             'SELECT id_profil, module, perimetre FROM t_perimetre_profil',
           );
+          this.logger.debug(`Périmètres chargés : ${rows.length} réglage(s) en base (défauts du cahier des charges pour les autres)`);
           return (this.lastConfig = new Map(rows.map((r) => [`${r.id_profil}:${r.module}`, r.perimetre])));
         },
         [CacheTag.PARAM],
@@ -100,7 +101,10 @@ export class PerimetreService {
   /** Restreint une région demandée au périmètre du module (403 si hors périmètre). */
   restrict(user: RniUser, module: PerimetreModule, requested?: number | null): number[] | null {
     if (requested != null) {
-      if (!this.isVisible(user, module, requested)) throw new BusinessException('RNI-1009', undefined, 403);
+      if (!this.isVisible(user, module, requested)) {
+        this.logger.warn(`Région ${requested} hors du périmètre ${module} de ${user.nigend} (régions ${user.perimetres[module]?.join(',') ?? 'toutes'})`);
+        throw new BusinessException('RNI-1009', undefined, 403);
+      }
       return [requested];
     }
     return user.perimetres[module];
@@ -151,6 +155,7 @@ export class PerimetreService {
       }
     });
     this.invalidate();
+    this.logger.log(`Périmètres modifiés par ${by} : ${dto.items.map((i) => `profil ${i.id_profil} ${i.module}=${i.perimetre}`).join(', ')}`);
     return this.matrix();
   }
 }

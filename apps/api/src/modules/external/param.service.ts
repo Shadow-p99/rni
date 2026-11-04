@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { ErrorCode, PARAM_JOURS_GLISSANTS, parseJoursGlissants } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
@@ -8,6 +8,8 @@ import { ParamApp } from '../../database/models/index.js';
 /** Configuration applicative en base (`t_param_app`), mise en cache 60 s (étiquette `param`). */
 @Injectable()
 export class ParamService {
+  private readonly logger = new Logger(ParamService.name);
+
   constructor(
     @InjectModel(ParamApp) private readonly params: typeof ParamApp,
     private readonly cache: CacheService,
@@ -17,7 +19,11 @@ export class ParamService {
     return this.cache.wrap(
       'param:all',
       CacheTtl.PARAM,
-      async () => new Map((await this.params.findAll({ raw: true })).map((r) => [r.cle_param_app, r])),
+      async () => {
+        const rows = await this.params.findAll({ raw: true });
+        this.logger.debug(`Paramètres t_param_app chargés : ${rows.length} clé(s)`);
+        return new Map(rows.map((r) => [r.cle_param_app, r]));
+      },
       [CacheTag.PARAM],
     );
   }
@@ -35,7 +41,10 @@ export class ParamService {
   /** Valeur obligatoire : erreur métier dédiée si la clé est absente (RNI-2002..2005). */
   async require(key: string, code: ErrorCode): Promise<string> {
     const v = await this.get(key);
-    if (v == null) throw new BusinessException(code, `Clé ${key} absente de t_param_app.`);
+    if (v == null) {
+      this.logger.error(`Paramètre obligatoire ${key} absent ou vide dans t_param_app (${code}).`);
+      throw new BusinessException(code, `Clé ${key} absente de t_param_app.`);
+    }
     return v;
   }
 

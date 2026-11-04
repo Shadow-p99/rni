@@ -193,3 +193,15 @@ Branche : `claude/prod-ready-audit`. Objet : rendre l'application exploitable en
 - **Test de charge** sur la volumétrie réelle (nombre d'agents, de cartes ouvertes simultanément) pour fixer `WEB_CONCURRENCY` et `PG_POOL_MAX`.
 - **Cahier des charges** (`docs/cahier-des-charges-RNI.md`) : il mentionne encore pm2. Je ne l'ai
   pas modifié (document de référence fourni) ; à mettre à jour par son auteur.
+
+## 6. Complément : journalisation
+
+- `Logger` NestJS dans tous les services, gardes, middlewares et clients externes, avec une
+  répartition des niveaux décrite dans le README (« Journalisation »).
+- Journal d'accès HTTP : une ligne par requête (méthode, chemin, statut, durée, taille, nigend,
+  `X-Request-Id`) ; requêtes lentes signalées.
+- Journal SQL activable à chaud, et requêtes lentes toujours signalées.
+- **Niveau piloté par la base** (`rni.log.level`, `rni.log.contexts`, `rni.log.sql`,
+  `rni.log.slow_ms`, migration 2.5.0), appliqué à chaud par tous les processus.
+- Correctif de confidentialité : la trace d'audit d'une modification de compte écrivait les
+  valeurs du téléphone personnel et du commentaire. Elle n'écrit plus que le nom des champs.

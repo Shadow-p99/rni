@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import {
   CreateUserDto,
@@ -54,6 +54,8 @@ interface RpsiRow {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly db: Db,
     private readonly adminLog: AdminLogService,
@@ -126,6 +128,9 @@ export class UsersService {
     const counted = Number(count?.total ?? 0);
     const capped = counted > MAX_COUNTED_ROWS;
     const total = Math.min(counted, MAX_COUNTED_ROWS);
+    this.logger.debug(
+      `Liste du personnel (${current.nigend}) : page ${page}×${size}, région ${region ?? 'toutes'}, profils ${profils.join(',')}, ${terms.length} mot(s) → ${total}${capped ? '+' : ''} compte(s)`,
+    );
     if (offset >= total) return { items: [], total, page, size, capped };
 
     // « Deferred join » : tri / pagination sur les seuls identifiants, puis détail des lignes de la page.
@@ -143,6 +148,7 @@ export class UsersService {
     const terms = searchTerms(q);
     if (!terms.length) return [];
     let scope = '';
+    this.logger.verbose(`Recherche de personnel planifiable (${current.nigend}) : ${terms.length} mot(s)`);
     if (current.id_profil === Profil.NEGOCIATEUR) scope = 'AND id_user = :me';
     else if (!isNationalAdmin(current.id_profil)) scope = 'AND id_region = :region';
     return this.db.select<UserDto>(
@@ -158,6 +164,7 @@ export class UsersService {
   async searchRpsi(current: RniUser, q: string): Promise<RpsiPersonnelDto[]> {
     if ((q ?? '').trim().length < 3) return [];
     const terms = searchTerms(q);
+    this.logger.verbose(`Recherche RPSI (${current.nigend}) : ${terms.length} mot(s)`);
     const scope = isNationalAdmin(current.id_profil) ? '' : 'AND v.id_region = :region';
     return this.db.select<RpsiPersonnelDto>(
       `SELECT v.nigend, v.nom, v.prenom, v.grade, v.code_unite, v.libelle_unite, v.id_region, v.libelle_region,
@@ -181,6 +188,7 @@ export class UsersService {
 
   private assertAssignable(current: RniUser, idProfil: number): void {
     if (!assignableProfils(current.id_profil).includes(idProfil)) {
+      this.logger.warn(`Attribution refusée : profil ${idProfil} par ${current.nigend} (profil ${current.id_profil}).`);
       throw BusinessException.forbidden('Ce profil ne peut pas être attribué.');
     }
   }
@@ -191,6 +199,7 @@ export class UsersService {
       throw BusinessException.forbidden('Seul un super administrateur gère ce compte.');
     }
     if (isNationalAdmin(current.id_profil)) return;
+    this.logger.verbose(`Contrôle de gestion : ${current.nigend} (région ${current.id_region}) → compte de la région ${target.id_region}, profil ${target.id_profil}`);
     if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
     if (GIGN_ONLY_PROFILS.includes(target.id_profil)) throw BusinessException.forbidden('Seul le GIGN gère les comptes GIGN et OMS.');
     if (target.id_region == null || target.id_region !== current.id_region) {
@@ -209,7 +218,10 @@ export class UsersService {
     this.assertAssignable(current, dto.id_profil);
     const rpsi = await this.rpsi(dto.nigend);
     const existing = await this.users.findOne({ where: { nigend: dto.nigend } });
-    if (!rpsi && !existing) throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU, `Nigend ${dto.nigend} inconnu du RPSI.`);
+    if (!rpsi && !existing) {
+      this.logger.warn(`Création refusée (${current.nigend}) : nigend ${dto.nigend} inconnu du RPSI.`);
+      throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU, `Nigend ${dto.nigend} inconnu du RPSI.`);
+    }
 
     const region = rpsi?.id_region ?? existing?.id_region ?? null;
     this.assertManageable(current, { id_region: region, id_profil: dto.id_profil });
@@ -259,8 +271,18 @@ export class UsersService {
       patch.tel_perso = tel;
     }
     if (dto.commentaire !== undefined) patch.commentaire = dto.commentaire?.trim() || null;
+    if (!Object.keys(patch).length) {
+      this.logger.debug(`Modification du compte ${target.nigend} par ${current.nigend} : aucun changement.`);
+      return this.getDetail(id);
+    }
     await target.update(patch);
-    this.adminLog.trace('user.update', current.nigend, { id_user: id, ...patch });
+    // Noms des champs modifiés seulement : ni téléphone ni commentaire dans les journaux
+    this.adminLog.trace('user.update', current.nigend, {
+      id_user: id,
+      nigend: target.nigend,
+      champs: Object.keys(patch),
+      ...(patch.id_profil != null ? { id_profil: patch.id_profil } : {}),
+    });
     return this.getDetail(id);
   }
 
@@ -276,6 +298,7 @@ export class UsersService {
 
   /** §7.4 : lignes NEO de l'agent (REMOP) — soi-même, ou un admin dans son périmètre. */
   async neoLines(current: RniUser, nigend: string) {
+    this.logger.debug(`Lignes NEO de ${nigend} demandées par ${current.nigend}`);
     if (nigend !== current.nigend) {
       if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
       const target = await this.users.findOne({ where: { nigend, bool_user_inactif: false } });
@@ -293,8 +316,10 @@ export class UsersService {
       const lines = await this.remop.lines(current.nigend);
       if (!lines.some((l) => l.id === geolocId)) throw BusinessException.invalid('Cette ligne NEO ne vous est pas attribuée.');
       await user.update({ geoloc_id_geoloc: geolocId, geoloc_indicatif: geolocIndicatif(user.id_user) });
+      this.logger.log(`Appareil NEO déclaré pour la géolocalisation : ${current.nigend}`);
     } else {
       await user.update({ geoloc_id_geoloc: null, geoloc_bool_geoloc: false, geoloc_bool_indispo: false });
+      this.logger.log(`Appareil NEO retiré, géolocalisation désactivée : ${current.nigend}`);
     }
     return this.me({ ...current, ...pickGeoloc(user) });
   }
@@ -306,6 +331,7 @@ export class UsersService {
     if (value && !user.geoloc_id_geoloc) throw BusinessException.invalid('Déclarez d’abord l’appareil à géolocaliser.');
     if (isIndispo) await user.update({ geoloc_bool_indispo: value });
     else await user.update({ geoloc_bool_geoloc: value, ...(value ? {} : { geoloc_bool_indispo: false }) });
+    this.logger.log(`Géolocalisation ${isIndispo ? 'en position Indisponible' : ''} ${value ? 'activée' : 'désactivée'} : ${current.nigend}`.replace(/\s+/g, ' '));
     return this.me({ ...current, ...pickGeoloc(user) });
   }
 }

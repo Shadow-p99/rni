@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ADMIN_PROFILS, Profil } from '@rni/shared';
 import type { Request } from 'express';
@@ -39,6 +39,8 @@ interface UserRow {
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
+  private readonly logger = new Logger(AuthGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly db: Db,
@@ -56,6 +58,7 @@ export class AuthGuard implements CanActivate {
 
     if (!nigend) {
       if (allowUnknown) return (req.rniUser = null), true;
+      this.logger.warn(`Requête sans en-tête nigend : ${req.method} ${req.originalUrl.split('?')[0]} depuis ${req.ip}`);
       throw BusinessException.unauthorized('En-tête nigend absent.');
     }
 
@@ -63,12 +66,17 @@ export class AuthGuard implements CanActivate {
     req.rniUser = user;
     if (!user) {
       if (allowUnknown) return true;
+      this.logger.warn(`Nigend ${nigend} non habilité à RNI (compte absent ou inactif) : ${req.method} ${req.originalUrl.split('?')[0]}`);
       throw BusinessException.unauthorized(`Nigend ${nigend} non habilité à RNI.`);
     }
 
     const profiles = this.reflector.getAllAndOverride<number[]>(PROFILES_KEY, targets);
     const allowed = profiles ?? (SAFE_METHODS.has(req.method) ? null : DEFAULT_WRITE_PROFILES);
-    if (allowed && !allowed.includes(user.id_profil)) throw BusinessException.forbidden();
+    if (allowed && !allowed.includes(user.id_profil)) {
+      this.logger.warn(`Accès refusé à ${user.nigend} (profil ${user.id_profil}) : ${req.method} ${req.originalUrl.split('?')[0]} réservé aux profils ${allowed.join(', ')}`);
+      throw BusinessException.forbidden();
+    }
+    this.logger.verbose(`Authentifié : ${user.nigend} (profil ${user.id_profil}, région ${user.id_region ?? '-'})`);
     return true;
   }
 
