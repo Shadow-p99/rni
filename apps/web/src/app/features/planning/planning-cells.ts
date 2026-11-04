@@ -16,13 +16,12 @@ export interface DayCell {
   today: boolean;
   jour: HalfCell;
   nuit: HalfCell;
-  /** Même plage sur le Jour et la Nuit → case entière (BR-PLA-1). */
-  full: boolean;
 }
 
 /**
  * BR-PLA-1 : une journée = deux demi-cases (haut = Jour 08h-18h, bas = Nuit 18h-08h),
- * colorées selon la position de service ; vide = gris clair.
+ * colorées selon la position de service ; vide = gris clair. Les deux demi-cases restent
+ * toujours séparées, même lorsqu'une même plage couvre la journée entière.
  */
 export function buildCells(
   plannings: TimetablePlanningDto[],
@@ -51,7 +50,6 @@ export function buildCells(
       today: date === today,
       jour,
       nuit,
-      full: !!jour.planning && jour.planning === nuit.planning,
     };
   });
 }

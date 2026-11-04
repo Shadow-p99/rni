@@ -60,43 +60,25 @@ export interface RangeSelect {
             </th>
             @for (c of row.cells; track c.date) {
               <td class="h-7 border-b border-l border-slate-100 p-0" [class.bg-slate-50]="c.weekend" [class.!bg-amber-50]="c.today">
-                @if (c.full) {
+                <!-- Toujours deux demi-cases séparées : Jour (haut) et Nuit (bas) -->
+                @for (h of [c.jour, c.nuit]; track h.slot) {
                   <button
                     type="button"
-                    class="block h-7 w-full"
-                    [class.rni-cell-selected]="selected(row.user.id_user, c.jour.slot) || selected(row.user.id_user, c.nuit.slot)"
+                    class="block h-3.5 w-full"
+                    [class.border-b]="h.creneau === 1"
+                    [class.border-white]="h.creneau === 1"
+                    [class.rni-cell-selected]="selected(row.user.id_user, h.slot)"
                     [class.cursor-pointer]="row.editable"
                     [class.touch-none]="row.editable"
-                    [style.background]="c.jour.color"
-                    [title]="title(c.jour)"
-                    [attr.aria-label]="title(c.jour)"
+                    [style.background]="h.color || (h.creneau === 1 ? '#e2e8f0' : '#cbd5e1')"
+                    [title]="title(h)"
+                    [attr.aria-label]="title(h)"
                     [attr.data-user]="row.user.id_user"
-                    [attr.data-slot]="c.jour.slot"
-                    [attr.data-slot2]="c.nuit.slot"
+                    [attr.data-slot]="h.slot"
                     [disabled]="!row.editable"
-                    (pointerdown)="onPointerDown($event, row.user, c.jour, c.nuit)"
-                    (click)="onKeyboardClick($event, row.user, c.jour)"
+                    (pointerdown)="onPointerDown($event, row.user, h)"
+                    (click)="onKeyboardClick($event, row.user, h)"
                   ></button>
-                } @else {
-                  @for (h of [c.jour, c.nuit]; track h.slot) {
-                    <button
-                      type="button"
-                      class="block h-3.5 w-full"
-                      [class.border-b]="h.creneau === 1"
-                      [class.border-white/70]="h.creneau === 1"
-                      [class.rni-cell-selected]="selected(row.user.id_user, h.slot)"
-                      [class.cursor-pointer]="row.editable"
-                      [class.touch-none]="row.editable"
-                      [style.background]="h.color || (h.creneau === 1 ? '#e2e8f0' : '#cbd5e1')"
-                      [title]="title(h)"
-                      [attr.aria-label]="title(h)"
-                      [attr.data-user]="row.user.id_user"
-                      [attr.data-slot]="h.slot"
-                      [disabled]="!row.editable"
-                      (pointerdown)="onPointerDown($event, row.user, h)"
-                      (click)="onKeyboardClick($event, row.user, h)"
-                    ></button>
-                  }
                 }
               </td>
             }
@@ -124,26 +106,17 @@ export class PlanningGrid {
     return this.selection.contains(userId, slot);
   }
 
-  /** Créneau sous le pointeur ; pour une journée pleine, haut = Jour, bas = Nuit. */
-  private slotAt(target: Element | null, clientY: number): { userId: number; slot: number } | null {
+  /** Demi-case (agent, créneau) sous le pointeur. */
+  private slotAt(target: Element | null): { userId: number; slot: number } | null {
     const el = target?.closest<HTMLElement>('[data-slot]');
-    if (!el) return null;
-    const userId = Number(el.dataset['user']);
-    let slot = Number(el.dataset['slot']);
-    if (el.dataset['slot2']) {
-      const r = el.getBoundingClientRect();
-      if (clientY > r.top + r.height / 2) slot = Number(el.dataset['slot2']);
-    }
-    return { userId, slot };
+    return el ? { userId: Number(el.dataset['user']), slot: Number(el.dataset['slot']) } : null;
   }
 
-  onPointerDown(e: PointerEvent, user: TimetableUserDto, half: HalfCell, nuit?: HalfCell): void {
+  onPointerDown(e: PointerEvent, user: TimetableUserDto, half: HalfCell): void {
     if (e.button !== 0) return;
     e.preventDefault(); // pas de sélection de texte pendant le glisser
-    const at = this.slotAt(e.currentTarget as Element, e.clientY);
-    const start = nuit && at?.slot === nuit.slot ? nuit : half;
-    this.origin = { user, half: start };
-    this.selection.start(user.id_user, start.slot);
+    this.origin = { user, half };
+    this.selection.start(user.id_user, half.slot);
     // Le tactile capture le pointeur sur l'élément de départ : on le relâche pour suivre le doigt.
     (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
   }
@@ -151,7 +124,7 @@ export class PlanningGrid {
   @HostListener('document:pointermove', ['$event'])
   onPointerMove(e: PointerEvent): void {
     if (!this.selection.active()) return;
-    const at = this.slotAt(document.elementFromPoint(e.clientX, e.clientY), e.clientY);
+    const at = this.slotAt(document.elementFromPoint(e.clientX, e.clientY));
     if (at) this.selection.move(at.userId, at.slot);
   }
 

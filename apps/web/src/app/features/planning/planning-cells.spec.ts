@@ -17,13 +17,14 @@ describe('buildCells (BR-PLA-1)', () => {
     expect(cells[1].nuit.planning).toBeNull();
     expect(cells[1].today).toBe(true);
     expect(cells[2].jour.planning).toBeNull();
-    expect(cells.some((c) => c.full)).toBe(false);
   });
 
-  it('marque les journées pleines', () => {
+  it('journée entière : deux demi-cases distinctes, de la même plage', () => {
     const cells = buildCells([p(1, '2026-03-02', 1, '2026-03-02', 2)], ['2026-03-02'], () => '#0f0', '');
-    expect(cells[0].full).toBe(true);
-    expect(cells[0].jour.color).toBe('#0f0');
+    expect(cells[0].jour).toMatchObject({ creneau: 1, color: '#0f0' });
+    expect(cells[0].nuit).toMatchObject({ creneau: 2, color: '#0f0' });
+    expect(cells[0].jour.slot).toBe(cells[0].nuit.slot - 1);
+    expect(cells[0].jour.planning).toBe(cells[0].nuit.planning);
   });
 
   it('repère les week-ends', () => {
