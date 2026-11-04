@@ -60,6 +60,7 @@ import { PlanningDesktopStore } from './planning-desktop.store';
             <rni-region-section
               [region]="r"
               [days]="store.dayHeaders()"
+              [collapsible]="store.collapsible()"
               (toggled)="store.toggleRegion(r.id_region)"
               (retry)="store.loadRegion(r.id_region)"
               (cellClick)="open($event)"

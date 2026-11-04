@@ -89,6 +89,9 @@ export class PlanningDesktopStore {
     return [...this.ref.regions()].sort((a, b) => Number(b.id_region === own) - Number(a.id_region === own));
   });
 
+  /** Une seule région visible : toujours dépliée, ni repliable ni dépliable. */
+  readonly collapsible = computed(() => this.regionList().length > 1);
+
   /** Un état de chargement par région (créé une fois : les régions visibles sont connues à l'ouverture). */
   private readonly states = new Map<number, AsyncState<TimetableRegionDto | null>>();
   /** Mois pour lequel chaque région a été chargée. */
@@ -278,6 +281,7 @@ export class PlanningDesktopStore {
 
   /** Dépliage : chargement à la demande (une seule fois par mois). */
   toggleRegion(id: number): void {
+    if (!this.collapsible()) return;
     if (this.filterActive()) {
       // Résultats filtrés : simple repli visuel, les données sont déjà là.
       const c = new Set(this.filterCollapsed());
