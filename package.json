@@ -19,6 +19,7 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d db",
-    "release": "pnpm build && rm -rf release && pnpm --filter @rni/api deploy --prod --legacy release/api && cp -r apps/web/dist/web/browser release/web"
+    "release": "pnpm build && rm -rf release && pnpm --filter @rni/api deploy --prod --legacy release/api && cp -r apps/web/dist/web/browser release/web",
+    "db:migrate": "for f in apps/api/db/migrations/*.sql; do echo \"→ $f\"; docker exec -i rni-db psql -U rni -d rni -v ON_ERROR_STOP=1 -q < \"$f\" || exit 1; done"
   }
 }

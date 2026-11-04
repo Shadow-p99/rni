@@ -20,7 +20,8 @@ import { Db } from './db.service.js';
         autoLoadModels: false,
         synchronize: false,
         logging: cfg.db.logging ? console.log : false,
-        dialectOptions: cfg.db.ssl ? { ssl: { rejectUnauthorized: true } } : {},
+        // JIT désactivé : sur des requêtes transactionnelles il coûte plus (compilation) qu'il ne rapporte.
+        dialectOptions: { options: '-c jit=off', ...(cfg.db.ssl ? { ssl: { rejectUnauthorized: true } } : {}) },
         pool: { max: 10, min: 0, idle: 10_000 },
         define: { underscored: true, freezeTableName: true },
       }),

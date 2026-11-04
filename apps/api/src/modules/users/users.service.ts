@@ -15,6 +15,12 @@ import {
   isAdminProfil,
   isValidPhone,
   listableProfils,
+  MAX_COUNTED_ROWS,
+  normalizePage,
+  type Page,
+  type SortDir,
+  type UserListQuery,
+  type UserSort,
 } from '@rni/shared';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import type { RniUser } from '../../common/auth/current-user.js';
@@ -78,47 +84,85 @@ export class UsersService {
   /**
    * BR-GPU-1 : comptes listés (profils 3, 4, 7 ; + 1 et 6 pour le GIGN), jamais les inactifs.
    * Les référents ne voient que leur région ; le GIGN peut filtrer par région.
+   * **Pagination côté serveur** : recherche, filtres et tri sont exécutés en SQL (index trigrammes).
    */
-  async list(current: RniUser, region?: number): Promise<UserDto[]> {
-    const regionFilter = current.id_profil === Profil.GIGN ? (region ?? null) : current.id_region;
-    if (current.id_profil !== Profil.GIGN && regionFilter == null) return [];
-    return this.db.select<UserDto>(
-      `SELECT ${USER_COLUMNS} FROM v_user_detail
-        WHERE NOT bool_user_inactif AND id_profil IN (:profils)
-          ${regionFilter != null ? 'AND id_region = :region' : ''}
-        ORDER BY classement, poids_grade DESC, nom, prenom`,
-      { profils: listableProfils(current.id_profil), region: regionFilter },
+  async list(current: RniUser, query: UserListQuery): Promise<Page<UserDto>> {
+    const { page, size, offset } = normalizePage(query.page, query.size);
+    const isGign = current.id_profil === Profil.GIGN;
+    if (!isGign && query.region != null && query.region !== current.id_region) {
+      throw new BusinessException(ErrorCode.HORS_PERIMETRE, 'Un référent ne consulte que le personnel de sa région.', 403);
+    }
+    const region = isGign ? (query.region ?? null) : current.id_region;
+    if (!isGign && region == null) return { items: [], total: 0, page, size };
+
+    const allowed = listableProfils(current.id_profil);
+    if (query.profil != null && !allowed.includes(query.profil)) return { items: [], total: 0, page, size };
+    const profils = query.profil != null ? [query.profil] : allowed;
+
+    const where = ['NOT s.bool_user_inactif', 's.id_profil IN (:profils)'];
+    const params: Record<string, unknown> = { profils, region, limit: size, offset, cap: MAX_COUNTED_ROWS + 1 };
+    if (region != null) where.push('s.id_region = :region');
+    searchTerms(query.q).forEach((term, i) => {
+      // Chaque mot doit apparaître (nom, prénom, nigend, code ou libellé d'unité).
+      // `= ANY(ARRAY(...))` permet un BitmapOr entre ix_ref_user_search (trigrammes) et ix_ref_user_unite.
+      where.push(
+        `((s.nigend || ' ' || s.nom || ' ' || s.prenom || ' ' || coalesce(s.code_unite, '')) ILIKE :t${i}
+          OR s.code_unite = ANY (ARRAY(SELECT code_unite FROM ref_unite WHERE libelle ILIKE :t${i})))`,
+      );
+      params[`t${i}`] = term;
+    });
+    const clause = where.join(' AND ');
+    const order = orderBy(query.sort, query.dir);
+
+    // Comptage plafonné : coût borné quel que soit le volume.
+    const count = await this.db.one<{ total: string }>(
+      `SELECT count(*) AS total FROM (SELECT 1 FROM ${SORT_BASE} WHERE ${clause} LIMIT :cap) c`,
+      params,
     );
+    const counted = Number(count?.total ?? 0);
+    const capped = counted > MAX_COUNTED_ROWS;
+    const total = Math.min(counted, MAX_COUNTED_ROWS);
+    if (offset >= total) return { items: [], total, page, size, capped };
+
+    // « Deferred join » : tri / pagination sur les seuls identifiants, puis détail des lignes de la page.
+    const items = await this.db.select<UserDto>(
+      `SELECT ${USER_COLUMNS} FROM v_user_detail s
+         JOIN (SELECT s.id_user FROM ${SORT_BASE} WHERE ${clause} ORDER BY ${order} LIMIT :limit OFFSET :offset) p USING (id_user)
+        ORDER BY ${order}`,
+      params,
+    );
+    return { items, total, page, size, capped };
   }
 
   /** Autocomplétion du personnel planifiable dans les droits d'écriture de l'utilisateur. */
   async planningCandidates(current: RniUser, q: string): Promise<UserDto[]> {
-    const term = `%${(q ?? '').trim()}%`;
+    const terms = searchTerms(q);
+    if (!terms.length) return [];
     let scope = '';
     if (current.id_profil === Profil.NEGOCIATEUR) scope = 'AND id_user = :me';
     else if (current.id_profil !== Profil.GIGN) scope = 'AND id_region = :region';
     return this.db.select<UserDto>(
       `SELECT ${USER_COLUMNS} FROM v_user_detail
         WHERE NOT bool_user_inactif AND id_profil IN (:profils) ${scope}
-          AND (nigend ILIKE :term OR nom ILIKE :term OR prenom ILIKE :term OR (prenom || ' ' || nom) ILIKE :term)
+          ${wordsClause("nigend || ' ' || nom || ' ' || prenom || ' ' || coalesce(code_unite, '')", terms.length)}
         ORDER BY nom, prenom LIMIT 20`,
-      { profils: PLANNING_PROFILS, me: current.id_user, region: current.id_region, term },
+      { profils: PLANNING_PROFILS, me: current.id_user, region: current.id_region, ...termParams(terms) },
     );
   }
 
   /** BR-GPU-2 : recherche RPSI (nigend, nom, prénom) pour la création de compte. */
   async searchRpsi(current: RniUser, q: string): Promise<RpsiPersonnelDto[]> {
-    const term = `%${(q ?? '').trim()}%`;
     if ((q ?? '').trim().length < 3) return [];
+    const terms = searchTerms(q);
     const scope = current.id_profil === Profil.GIGN ? '' : 'AND v.id_region = :region';
     return this.db.select<RpsiPersonnelDto>(
       `SELECT v.nigend, v.nom, v.prenom, v.grade, v.code_unite, v.libelle_unite, v.id_region, v.libelle_region,
               ru.id_user, ru.bool_user_inactif
          FROM v_personnel_to_ref_user v LEFT JOIN ref_user ru ON ru.nigend = v.nigend
-        WHERE (v.nigend ILIKE :term OR v.nom ILIKE :term OR v.prenom ILIKE :term OR (v.prenom || ' ' || v.nom) ILIKE :term)
+        WHERE TRUE ${wordsClause("v.nigend || ' ' || v.nom || ' ' || v.prenom", terms.length)}
           ${scope}
         ORDER BY v.nom, v.prenom LIMIT 20`,
-      { term, region: current.id_region },
+      { region: current.id_region, ...termParams(terms) },
     );
   }
 
@@ -265,4 +309,50 @@ function pickGeoloc(u: RefUser) {
     geoloc_bool_geoloc: u.geoloc_bool_geoloc,
     geoloc_bool_indispo: u.geoloc_bool_indispo,
   };
+}
+
+/** Découpe la recherche en mots (5 max), échappe les jokers SQL et encadre de `%`. */
+export function searchTerms(q?: string | null): string[] {
+  return (q ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0)
+    .slice(0, 5)
+    .map((w) => `%${w.slice(0, 64).replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+}
+
+/** `AND expr ILIKE :t0 AND expr ILIKE :t1 …` (expression couverte par un index trigrammes). */
+function wordsClause(expr: string, n: number): string {
+  return Array.from({ length: n }, (_, i) => `AND (${expr}) ILIKE :t${i}`).join(' ');
+}
+
+function termParams(terms: string[]): Record<string, string> {
+  return Object.fromEntries(terms.map((t, i) => [`t${i}`, t]));
+}
+
+/** Table de tri étroite : uniquement les colonnes utiles au filtre et au tri (pas de jointures larges). */
+const SORT_BASE = `(SELECT ru.id_user, ru.nigend, ru.nom, ru.prenom, ru.code_unite, ru.id_profil, ru.id_region, ru.bool_user_inactif,
+         COALESCE(pc.classement, 99) AS classement, COALESCE(g.poids, 0) AS poids_grade, r.libelle AS libelle_region
+    FROM ref_user ru
+    LEFT JOIN t_profil_classement pc ON pc.id_profil = ru.id_profil
+    LEFT JOIN ref_grade_personnel g ON g.id_grade_personnel = ru.id_grade_personnel
+    LEFT JOIN ref_regions r ON r.id_region = ru.id_region) s`;
+
+/** Tri sur liste blanche (jamais de nom de colonne issu de la requête) ; `id_user` garantit une pagination stable. */
+export function orderBy(sort: UserSort | undefined, dir: SortDir | undefined): string {
+  const d = dir === 'desc' ? 'DESC' : 'ASC';
+  switch (sort) {
+    case 'nom':
+      return `s.nom ${d}, s.prenom ${d}, s.id_user ${d}`;
+    case 'nigend':
+      return `s.nigend ${d}, s.id_user`;
+    case 'unite':
+      return `s.code_unite ${d} NULLS LAST, s.nom, s.prenom, s.id_user`;
+    case 'region':
+      return `s.libelle_region ${d} NULLS LAST, s.nom, s.prenom, s.id_user`;
+    case 'profil':
+      return `s.classement ${d}, s.nom, s.prenom, s.id_user`;
+    default:
+      return 's.classement, s.poids_grade DESC, s.nom, s.prenom, s.id_user';
+  }
 }

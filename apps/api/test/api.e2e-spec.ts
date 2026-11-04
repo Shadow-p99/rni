@@ -153,9 +153,36 @@ describe('API RNI (e2e)', () => {
 
   describe('gestion du personnel (BR-GPU-1..4)', () => {
     it('liste : référent limité à sa région et aux profils 3/4/7', async () => {
-      const r = await as(REFERENT_IDF).get('/users');
-      expect(r.body.every((u: { id_region: number; id_profil: number }) => u.id_region === 11 && [3, 4, 7].includes(u.id_profil))).toBe(true);
+      const r = await as(REFERENT_IDF).get('/users?size=100');
+      expect(r.body.items.length).toBe(r.body.total);
+      expect(r.body.items.every((u: { id_region: number; id_profil: number }) => u.id_region === 11 && [3, 4, 7].includes(u.id_profil))).toBe(true);
       expect((await as(NEGO_IDF).get('/users')).status).toBe(403);
+      expect((await as(REFERENT_IDF).get('/users?region=84')).status).toBe(403);
+    });
+    it('pagination côté serveur : pages disjointes, total, bornes', async () => {
+      const p1 = (await as(GIGN).get('/users?size=10')).body;
+      const p2 = (await as(GIGN).get('/users?size=10&page=2')).body;
+      expect(p1).toMatchObject({ page: 1, size: 10, capped: false });
+      expect(p1.items).toHaveLength(10);
+      expect(p1.total).toBeGreaterThan(20);
+      const ids = new Set(p1.items.map((u: { id_user: number }) => u.id_user));
+      expect(p2.items.some((u: { id_user: number }) => ids.has(u.id_user))).toBe(false);
+      const last = Math.ceil(p1.total / 10);
+      expect((await as(GIGN).get(`/users?size=10&page=${last + 5}`)).body.items).toEqual([]);
+      expect((await as(GIGN).get('/users?size=1000')).body.code).toBe('RNI-1002');
+      expect((await as(GIGN).get('/users?sort=nom;drop')).body.code).toBe('RNI-1002');
+    });
+    it('recherche multi-mots, filtres et tri en SQL', async () => {
+      const byName = (await as(GIGN).get('/users?q=FOURNIER%20C%C3%A9line')).body;
+      expect(byName.items.map((u: { nigend: string }) => u.nigend)).toEqual([REFERENT_IDF]);
+      const joker = (await as(GIGN).get('/users?q=_')).body;
+      expect(joker.total).toBe(0);
+      const byUnit = (await as(GIGN).get('/users?q=Gironde')).body;
+      expect(byUnit.total).toBeGreaterThan(0);
+      const oms = (await as(GIGN).get('/users?profil=6')).body;
+      expect(oms.items.every((u: { id_profil: number }) => u.id_profil === 6)).toBe(true);
+      const sorted = (await as(GIGN).get('/users?sort=nigend&dir=desc&size=5')).body.items.map((u: { nigend: string }) => u.nigend);
+      expect([...sorted].sort().reverse()).toEqual(sorted);
     });
     it('création depuis le RPSI, réactivation, inconnu', async () => {
       const candidates = (await as(GIGN).get('/users/rpsi?q=2000')).body as { nigend: string; id_user: number | null }[];
@@ -171,14 +198,14 @@ describe('API RNI (e2e)', () => {
       expect((await as(REFERENT_IDF).post('/users', { nigend: '200016', id_profil: 1 })).status).toBe(403);
     });
     it('suppression logique (BR-GPU-4)', async () => {
-      const list = (await as(REFERENT_IDF).get('/users')).body as { id_user: number; nigend: string }[];
+      const list = (await as(REFERENT_IDF).get(`/users?q=${NEGO_IDF_2}`)).body.items as { id_user: number; nigend: string }[];
       const target = list.find((u) => u.nigend === NEGO_IDF_2)!;
       expect((await as(REFERENT_IDF).del(`/users/${target.id_user}`)).status).toBe(204);
       expect((await as(NEGO_IDF_2).get('/users/isUser')).body).toBe(false);
       expect((await as(REFERENT_IDF).post('/users', { nigend: NEGO_IDF_2, id_profil: 4 })).status).toBe(201);
     });
     it('téléphone personnel validé', async () => {
-      const list = (await as(REFERENT_IDF).get('/users')).body as { id_user: number; nigend: string }[];
+      const list = (await as(REFERENT_IDF).get(`/users?q=${NEGO_IDF}`)).body.items as { id_user: number; nigend: string }[];
       const target = list.find((u) => u.nigend === NEGO_IDF)!;
       expect((await as(REFERENT_IDF).put(`/users/${target.id_user}`, { tel_perso: '123' })).body.code).toBe('RNI-1002');
       expect((await as(REFERENT_IDF).put(`/users/${target.id_user}`, { tel_perso: '0612345678', commentaire: 'ok' })).status).toBe(200);

@@ -1,36 +1,65 @@
-<div class="mx-auto flex w-full max-w-7xl flex-col gap-3 p-3 desk:p-4">
-  <div class="card flex flex-wrap items-center gap-2 p-3">
-    <h1 class="mr-4 text-lg font-semibold">Gestion du personnel</h1>
-    <input class="input w-72" type="search" placeholder="Nom, prénom, nigend, unité, profil, région…" [ngModel]="search()" (ngModelChange)="search.set($event)" aria-label="Rechercher" />
+<div class="mx-auto flex w-full max-w-7xl flex-col gap-3 p-3 pb-16 desk:p-4 desk:pb-16">
+  <div class="card flex flex-wrap items-end gap-3 p-3">
+    <div class="mr-2 self-center">
+      <h1 class="text-lg font-semibold">Gestion du personnel</h1>
+      <p class="text-xs text-slate-500">{{ result().total | number }}{{ result().capped ? '+' : '' }} compte(s)</p>
+    </div>
+    <div class="min-w-64 flex-1">
+      <label class="label" for="g-q">Recherche</label>
+      <input id="g-q" class="input" type="search" placeholder="Nom, prénom, nigend, code ou libellé d'unité…" [ngModel]="q()" (ngModelChange)="onSearch($event)" />
+    </div>
     @if (auth.isGign()) {
-      <select class="input w-60" [ngModel]="region()" (ngModelChange)="setRegion($event)" aria-label="Région">
-        <option [ngValue]="null">Toutes les régions</option>
-        @for (r of ref.allRegions(); track r.id_region) {
-          <option [ngValue]="r.id_region">{{ r.libelle }}</option>
+      <div>
+        <label class="label" for="g-region">Région</label>
+        <select id="g-region" class="input w-56" [ngModel]="region()" (ngModelChange)="setFilter('region', $event)">
+          <option [ngValue]="null">Toutes les régions</option>
+          @for (r of ref.allRegions(); track r.id_region) {
+            <option [ngValue]="r.id_region">{{ r.libelle }}</option>
+          }
+        </select>
+      </div>
+    } @else {
+      <p class="self-center text-sm text-slate-500">Région : {{ auth.user()?.libelle_region }}</p>
+    }
+    <div>
+      <label class="label" for="g-profil">Profil</label>
+      <select id="g-profil" class="input w-44" [ngModel]="profilFilter()" (ngModelChange)="setFilter('profil', $event)">
+        <option [ngValue]="null">Tous</option>
+        @for (id of listable(); track id) {
+          <option [ngValue]="id">{{ libelles[id] }}</option>
         }
       </select>
-    } @else {
-      <span class="text-sm text-slate-500">Région : {{ auth.user()?.libelle_region }}</span>
+    </div>
+    @if (hasFilters()) {
+      <button type="button" class="btn-ghost" (click)="resetFilters()">Réinitialiser</button>
     }
-    <span class="text-xs text-slate-500">{{ filtered().length }} compte(s)</span>
     <button type="button" class="btn-primary ml-auto" (click)="openAdd()">+ Inscrire un personnel</button>
   </div>
 
-  <div class="card overflow-x-auto">
-    <table class="w-full text-sm">
+  <div class="card relative overflow-x-auto" [attr.aria-busy]="loading()">
+    @if (loading()) {
+      <div class="absolute inset-x-0 top-0 h-0.5 animate-pulse bg-rni-600"></div>
+    }
+    <table class="w-full text-sm" [class.opacity-60]="loading()">
       <thead class="bg-slate-50 text-left text-xs text-slate-500 uppercase">
         <tr>
-          <th class="px-3 py-2">Personnel</th>
-          <th class="px-3 py-2">Nigend</th>
-          <th class="px-3 py-2">Unité</th>
-          <th class="px-3 py-2">Région</th>
-          <th class="px-3 py-2">Profil</th>
-          <th class="px-3 py-2">Téléphones</th>
+          @for (c of columns; track c.label) {
+            <th class="px-3 py-2" [attr.aria-sort]="c.sort && sort() === c.sort ? (dir() === 'asc' ? 'ascending' : 'descending') : null">
+              @if (c.sort) {
+                <button type="button" class="inline-flex items-center gap-1 uppercase hover:text-slate-800" (click)="toggleSort(c.sort)">
+                  {{ c.label }}
+                  <span class="text-[10px]">{{ sort() === c.sort ? (dir() === 'asc' ? '▲' : '▼') : '↕' }}</span>
+                </button>
+              } @else {
+                {{ c.label }}
+              }
+            </th>
+          }
           <th class="px-3 py-2 text-right">Actions</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
-        @for (u of filtered(); track u.id_user) {
+        @for (u of result().items; track u.id_user) {
           <tr class="hover:bg-slate-50">
             <td class="px-3 py-2"><span class="font-medium">{{ u.abreviation_grade }} {{ u.nom }}</span> {{ u.prenom }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ u.nigend }}</td>
@@ -53,11 +82,21 @@
             </td>
           </tr>
         } @empty {
-          <tr><td colspan="7" class="px-3 py-6 text-center text-slate-500">{{ loading() ? 'Chargement…' : 'Aucun compte.' }}</td></tr>
+          <tr><td colspan="7" class="px-3 py-6 text-center text-slate-500">{{ loading() ? 'Chargement…' : 'Aucun compte ne correspond.' }}</td></tr>
         }
       </tbody>
     </table>
   </div>
+
+  <rni-paginator
+    class="no-print"
+    [page]="page()"
+    [size]="size()"
+    [total]="result().total"
+    [capped]="!!result().capped"
+    (pageChange)="setPage($event)"
+    (sizeChange)="setSize($event)"
+  />
 </div>
 
 @if (dialog()?.kind === 'add') {

@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseIntPipe, P
 import { ADMIN_PROFILS, Profil, isAdminProfil } from '@rni/shared';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
 import { ALL_PROFILES, AllowUnknownUser, Profiles } from '../../common/auth/decorators.js';
-import { ActivateLocationBody, CreateUserBody, InfoDeviceBody, UpdateUserBody } from './users.dto.js';
+import { ActivateLocationBody, CreateUserBody, InfoDeviceBody, UpdateUserBody, UserListQueryParams } from './users.dto.js';
 import { UsersService } from './users.service.js';
 
 @Controller('users')
@@ -32,8 +32,8 @@ export class UsersController {
 
   @Get()
   @Profiles(...ADMIN_PROFILS)
-  list(@CurrentUser() user: RniUser, @Query('region') region?: string) {
-    return this.service.list(user, region ? Number(region) : undefined);
+  list(@CurrentUser() user: RniUser, @Query() query: UserListQueryParams) {
+    return this.service.list(user, query);
   }
 
   @Get('search')

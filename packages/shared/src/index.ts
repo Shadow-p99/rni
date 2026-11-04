@@ -6,3 +6,4 @@ export * from './planning-rules.js';
 export * from './validators.js';
 export * from './formulaire.js';
 export * from './dto.js';
+export * from './pagination.js';

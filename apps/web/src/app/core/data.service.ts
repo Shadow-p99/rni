@@ -22,6 +22,8 @@ import type {
   TimetableDto,
   UpdateUserDto,
   UserDto,
+  UserListQuery,
+  Page,
 } from '@rni/shared';
 import { API } from './api';
 import { SILENT } from './http.interceptor';
@@ -73,8 +75,9 @@ export class PlanningApi {
 export class UsersApi {
   private readonly http = inject(HttpClient);
 
-  list(region?: number | null) {
-    return this.http.get<UserDto[]>(`${API}/users`, { params: params({ region }) });
+  /** Liste paginée côté serveur (recherche, filtres, tri). */
+  list(query: UserListQuery) {
+    return this.http.get<Page<UserDto>>(`${API}/users`, { params: params({ ...query }) });
   }
   search(q: string) {
     return this.http.get<UserDto[]>(`${API}/users/search`, { params: params({ q }), ...silent });

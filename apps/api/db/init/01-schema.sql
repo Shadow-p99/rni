@@ -5,6 +5,7 @@
 SET client_encoding = 'UTF8';
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- recherche ILIKE '%…%' indexée (listes paginées)
 
 -- -----------------------------------------------------------------------------
 -- Référentiels
@@ -77,6 +78,7 @@ CREATE TABLE ref_unite (
   id_departement varchar(3) REFERENCES lien_departement_region (id_departement),
   tel_unite      varchar(32)
 );
+CREATE INDEX ix_unite_libelle ON ref_unite USING gin (libelle gin_trgm_ops);
 
 -- -----------------------------------------------------------------------------
 -- RPSI (alimenté par flux RH externe)
@@ -93,6 +95,7 @@ CREATE TABLE rpsi_personnel (
   numero_neo_2       varchar(128),
   date_maj           timestamptz NOT NULL DEFAULT now()
 );
+CREATE INDEX ix_rpsi_search ON rpsi_personnel USING gin ((nigend || ' ' || nom || ' ' || prenom) gin_trgm_ops);
 
 -- -----------------------------------------------------------------------------
 -- Tables métier
@@ -121,7 +124,12 @@ CREATE TABLE ref_user (
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_ref_user_region ON ref_user (id_region) WHERE NOT bool_user_inactif;
+CREATE INDEX ix_ref_user_region ON ref_user (id_region, id_profil) WHERE NOT bool_user_inactif;
+CREATE INDEX ix_ref_user_nom ON ref_user (nom, prenom, id_user) WHERE NOT bool_user_inactif;
+CREATE INDEX ix_ref_user_unite ON ref_user (code_unite);
+-- Recherche plein texte de la gestion du personnel (même expression que UsersService.list)
+CREATE INDEX ix_ref_user_search ON ref_user
+  USING gin ((nigend || ' ' || nom || ' ' || prenom || ' ' || coalesce(code_unite, '')) gin_trgm_ops);
 
 -- Une plage = [date_debut @ créneau, date_fin @ créneau].
 -- slot_* : index de créneau (jours depuis 1970-01-01 × 2 + créneau − 1), cf. @rni/shared.

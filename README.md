@@ -64,6 +64,7 @@ Sans Docker : créer une base `rni` (utilisateur `rni`/`rni`) puis exécuter dan
 | `pnpm typecheck` | Vérification de types |
 | `pnpm release` | Artefacts de livraison : `release/api` (API autonome + `node_modules` de prod) et `release/web` |
 | `pnpm db:up` / `db:reset` / `db:down` | Base de développement Docker |
+| `pnpm db:migrate` | Applique `apps/api/db/migrations/*.sql` (idempotents) sur la base Docker existante |
 
 ---
 
@@ -117,6 +118,7 @@ authentifié, 403 non autorisé / hors périmètre, 404 introuvable.
 - `init/02-referentiels.sql` : profils, positions (couleurs), créneaux, grades, régions INSEE et
   voisinages, centres régionaux, 101 départements avec leur fuseau, catalogue des messages.
 - `init/03-param-app.sql` : paramétrage de développement ; `env/param-app.template.sql` pour la prod.
+- `migrations/*.sql` : évolutions idempotentes à appliquer sur une base existante (`pnpm db:migrate`).
 - `dev/90-seed-dev.sql` : **jeu de données fictif** (unités, ~110 personnels RPSI, comptes, plannings
   du mois précédent au mois suivant, fiches d'exemple).
 
@@ -132,7 +134,7 @@ colonnes générées `slot_debut` / `slot_fin`. Une **contrainte d'exclusion** P
 | `/planning` | Calendrier mensuel par région, demi-cases Jour / Nuit, filtres au créneau courant, compteurs, saisie / modification / insertion / suppression, export PDF A4 paysage | habilités (bascule mobile < 1038 px) |
 | `/planning-mobile` | Calendrier compact avec compteurs par jour et position, liste du créneau courant, saisie rapide | habilités |
 | `/formulaire`, `/formulaire/:id` | Fiches de crise : liste filtrée, formulaire en 4 sections, validations, clôture, export PDF sélectif | profils 1, 3, 4, 7 |
-| `/gestion` | Gestion du personnel : recherche, inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
+| `/gestion` | Gestion du personnel **paginée côté serveur** (recherche multi-mots, filtres région / profil, tri par colonne, état dans l'URL), inscription depuis le RPSI, modification, suppression logique | profils 1, 3, 7 |
 | `/testvie` | Monitoring : API, base, Facade, GEOLOC, REMOP | public |
 
 En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_app`), compte personnel
@@ -140,6 +142,22 @@ En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_ap
 `apps/web/public/mentions-legales.pdf`). Matomo est activé dès que `rni.matomo.url` est renseigné.
 
 ---
+
+## Listes volumineuses : pagination
+
+`GET /users?page=&size=&q=&region=&profil=&sort=nom|nigend|unite|region|profil&dir=asc|desc` renvoie
+`{ items, total, page, size, capped }` — jamais la liste complète (20 par défaut, 100 au maximum).
+
+- **Recherche** : chaque mot doit apparaître dans nom, prénom, nigend, code ou libellé d'unité ;
+  index trigrammes `pg_trgm` (`ix_ref_user_search`, `ix_unite_libelle`), jokers `%` / `_` échappés.
+- **Tri** sur liste blanche, départagé par `id_user` (pagination stable).
+- **« Deferred join »** : tri et `OFFSET` sur une table étroite, détail chargé pour les seules lignes de la page.
+- **Comptage plafonné à 100 000** : au-delà, `capped: true`, l'écran affiche « 100 000+ — affinez la
+  recherche » ; le coût d'une requête reste borné quel que soit le volume.
+- JIT PostgreSQL désactivé pour les connexions de l'API (coût de compilation supérieur au gain).
+
+Mesuré sur **1 000 000** de comptes : page 1 ≈ 0,2 s, page 5 000 ≈ 0,1–0,5 s, recherche ≈ 0,01–0,2 s.
+Les autocomplétions (RPSI, personnel du planning) utilisent les mêmes index et sont limitées à 20 résultats.
 
 ## Dette technique du §9 : traitement
 
@@ -152,7 +170,7 @@ En-tête : navigation, **permanence GIGN** (numéro paramétré dans `t_param_ap
 | 5 | Endpoints morts | `/crise`, `/users/negociateur`, `CriseService` et `planning.annee_mois` supprimés ; point de crise éphémère côté carte |
 | 6 | Permanence GIGN en dur | Paramètre `rni.permanence.gign` (exposé via `/service/configuration`) |
 | 7 | `is_actif` ignoré / unicité fragile | `GET /referentiel/positions?actif=true` + contrôle `is_actif` à l'écriture ; unicité par intervalles d'index de créneau + contrainte en base, couverte par les tests |
-| 8 | Aucun test | Tests unitaires (règles partagées, priorité d'affichage carte, droits, validations) et e2e API sur PostgreSQL |
+| 8 | Aucun test / pas de pagination | Pagination serveur de la gestion du personnel (voir ci-dessus) ; tests unitaires (règles partagées, priorité d'affichage carte, droits, validations) et e2e API sur PostgreSQL |
 | 9 | Échappement maison des apostrophes | Supprimé (requêtes paramétrées / ORM) |
 | 10 | Journalisation en base si PostgreSQL tombe | Le filtre d'erreurs répond toujours (503 `RNI-0001` / libellés de repli) et bascule sur les logs applicatifs |
 

@@ -1,6 +1,6 @@
-import type { CreateUserDto, UpdateUserDto } from '@rni/shared';
+import { MAX_PAGE_SIZE, USER_SORTS, type CreateUserDto, type SortDir, type UpdateUserDto, type UserListQuery, type UserSort } from '@rni/shared';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 export class CreateUserBody implements CreateUserDto {
   @Matches(/^\d{5,8}$/, { message: 'nigend invalide' })
@@ -46,4 +46,43 @@ export class ActivateLocationBody {
 
   @IsBoolean()
   value: boolean;
+}
+
+/** `GET /users?page=&size=&q=&region=&profil=&sort=&dir=` */
+export class UserListQueryParams implements UserListQuery {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_PAGE_SIZE)
+  size?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  region?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  profil?: number;
+
+  @IsOptional()
+  @IsIn(USER_SORTS)
+  sort?: UserSort;
+
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  dir?: SortDir;
 }
