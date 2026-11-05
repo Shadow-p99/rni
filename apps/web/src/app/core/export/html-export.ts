@@ -1,6 +1,11 @@
-/** Export d'un élément HTML en PDF A4 (html2canvas + jsPDF), paginé si nécessaire. */
+/**
+ * Rendu HTML → image avec html2canvas-pro : même API que html2canvas, mais compatible avec les
+ * couleurs CSS modernes (`oklch()`, `lab()`, `color()`) utilisées par Tailwind 4.
+ */
+
+/** Export d'un élément HTML en PDF A4 (html2canvas-pro + jsPDF), paginé si nécessaire. */
 export async function exportElementToPdf(el: HTMLElement, filename: string, orientation: 'landscape' | 'portrait' = 'landscape'): Promise<void> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')]);
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas-pro'), import('jspdf')]);
   const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: el.scrollWidth });
   const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
@@ -22,7 +27,7 @@ export async function exportElementToPdf(el: HTMLElement, filename: string, orie
 
 /** Capture PNG d'un élément (export de la carte). */
 export async function exportElementToPng(el: HTMLElement, filename: string): Promise<void> {
-  const { default: html2canvas } = await import('html2canvas');
+  const { default: html2canvas } = await import('html2canvas-pro');
   const canvas = await html2canvas(el, { useCORS: true, backgroundColor: null, scale: 1 });
   const a = document.createElement('a');
   a.href = canvas.toDataURL('image/png');
