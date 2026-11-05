@@ -169,4 +169,35 @@ describe('PlanningStore : chargement par région', () => {
       expect(req.request.params.get('q')).toBe('dupont');
     });
   });
+
+  it('export PDF : toutes les régions du périmètre, dépliées ou non, en une requête, dans l’ordre d’affichage', async () => {
+    store.init();
+    ctrl.expectOne('/rni/api/region/getNbPositionServiceByRegion').flush(counts);
+    flushTt(timetableReqs());
+    await vi.waitFor(() => expect(store.regions()[0].loaded).toBe(true));
+    expect(store.regions().filter((r) => r.expanded)).toHaveLength(1);
+
+    const p = store.exportRegions();
+    const [req] = timetableReqs();
+    expect(req.request.params.has('region')).toBe(false);
+    const user = (id: number) => ({ id_user: id, nigend: String(id), nom: 'N', prenom: 'P', plannings: [] }) as unknown as TimetableDto['regions'][0]['users'][0];
+    req.flush({
+      month: store.month(),
+      first: `${store.month()}-01`,
+      last: `${store.month()}-30`,
+      regions: [
+        { id_region: 84, libelle: 'Auvergne-Rhône-Alpes', users: [user(1), user(2)] },
+        { id_region: 24, libelle: 'Centre-Val de Loire', users: [] },
+        { id_region: 11, libelle: 'Île-de-France', users: [user(3)] },
+      ],
+    });
+    const regions = await p;
+    // Sa région d'abord (ordre d'affichage), régions sans personnel omises
+    expect(regions.map((r) => [r.id_region, r.rows.length])).toEqual([
+      [11, 1],
+      [84, 2],
+    ]);
+    // L'affichage n'a pas changé
+    expect(store.regions().filter((r) => r.expanded)).toHaveLength(1);
+  });
 });

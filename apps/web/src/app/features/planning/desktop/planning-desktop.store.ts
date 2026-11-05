@@ -10,7 +10,7 @@ import {
   localDateIso,
   monthBounds,
 } from '@rni/shared';
-import { map } from 'rxjs';
+import { firstValueFrom, map } from 'rxjs';
 import { PlanningApi } from '../../../core/api/planning.api';
 import { AuthService } from '../../../core/auth/auth.service';
 import type { AppError } from '../../../core/errors/app-error';
@@ -182,6 +182,22 @@ export class PlanningDesktopStore {
           rows: open ? this.rowsOf(r.users, r.id_region) : [],
         };
       });
+  }
+
+  /**
+   * Données de l'export PDF : **toutes** les régions du périmètre pour le mois affiché (ou tous
+   * les résultats du filtre), qu'elles soient dépliées ou non, en une seule requête. L'affichage
+   * (régions dépliées, données chargées) n'est pas modifié.
+   */
+  async exportRegions(): Promise<{ id_region: number; libelle: string; rows: PlanningRow[] }[]> {
+    const month = this.month();
+    const filter = this.filterActive() ? { q: this.query() || undefined, positions: [...this.positions()] } : {};
+    const tt = this.filterActive() && this.filtered.data()?.month === month ? this.filtered.data()! : await firstValueFrom(this.api.timetable(month, null, { silent: true }, filter));
+    const order = new Map(this.regionList().map((r, i) => [r.id_region, i]));
+    return [...tt.regions]
+      .filter((r) => r.users.length > 0)
+      .sort((a, b) => (order.get(a.id_region) ?? 99) - (order.get(b.id_region) ?? 99))
+      .map((r) => ({ id_region: r.id_region, libelle: r.libelle, rows: this.rowsOf(r.users, r.id_region) }));
   }
 
   /** Au moins une région dépliée et chargée (export PDF possible). */

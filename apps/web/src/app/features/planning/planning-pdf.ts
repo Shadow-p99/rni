@@ -1,12 +1,12 @@
 import type { PositionServiceDto } from '@rni/shared';
-import type { RegionView } from './desktop/planning-desktop.store';
+import type { PlanningRow } from './desktop/planning-desktop.store';
 
 export interface PlanningPdfInput {
   /** Mois `YYYY-MM`. */
   month: string;
   days: { date: string; day: number; letter: string; weekend: boolean; today: boolean }[];
-  /** Régions affichées (dépliées et chargées), avec leurs lignes. */
-  regions: RegionView[];
+  /** Régions à imprimer (toutes celles du périmètre, ou les résultats du filtre), avec leurs lignes. */
+  regions: { libelle: string; rows: PlanningRow[] }[];
   positions: Pick<PositionServiceDto, 'libelle' | 'color'>[];
   editeur: string;
   /** Filtre actif à rappeler (recherche, position « Maintenant »). */

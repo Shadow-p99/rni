@@ -1,5 +1,4 @@
 import type { TimetableUserDto } from '@rni/shared';
-import type { RegionView } from './desktop/planning-desktop.store';
 import { buildCells } from './planning-cells';
 import { buildPlanningPdf, hexToRgb } from './planning-pdf';
 
@@ -24,7 +23,7 @@ describe('PDF du planning (vectoriel)', () => {
       departementHeader: i === 0 ? '78 — Yvelines' : null,
       editable: true,
     }));
-    const region = { id_region: 11, libelle: 'Île-de-France', rows, expanded: true, loaded: true } as unknown as RegionView;
+    const region = { libelle: 'Île-de-France', rows };
     const doc = await buildPlanningPdf(
       {
         month: '2026-11',

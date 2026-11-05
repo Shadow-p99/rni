@@ -26,7 +26,7 @@ import { exportPlanningPdf } from '../planning-pdf';
         <rni-search-input class="w-64" placeholder="Rechercher dans toutes les régions…" [value]="store.search()" (searched)="store.setSearch($event)" />
         <rni-position-filter label="Maintenant :" [withNone]="true" [clearable]="true" [value]="store.positions()" (valueChange)="store.setPositions($event)" />
         <div class="ml-auto flex gap-2">
-          <button type="button" class="btn-secondary" (click)="exportPdf()" [disabled]="exporter.busy() || !store.hasData()">{{ exporter.busy() ? 'Export…' : '⤓ PDF' }}</button>
+          <button type="button" class="btn-secondary" (click)="exportPdf()" [disabled]="exporter.busy() || !store.regionList().length" title="Toutes les régions, dépliées ou non">{{ exporter.busy() ? 'Export…' : '⤓ PDF' }}</button>
           @if (auth.canWritePlanning()) {
             <button type="button" class="btn-primary" (click)="form.set({ date: store.today, creneau: Jour })">+ Nouveau créneau</button>
           }
@@ -126,10 +126,9 @@ export class PlanningDesktopView {
     this.store.refresh();
   }
 
-  /** PDF dessiné à partir des données affichées (régions dépliées, filtres actifs). */
+  /** PDF de **toutes** les régions du périmètre (dépliées ou non), filtres actifs appliqués. */
   exportPdf(): void {
     const s = this.store;
-    const regions = s.regions().filter((r) => r.expanded && r.loaded && r.rows.length > 0);
     const filtre = [
       s.query() ? `recherche « ${s.query()} »` : '',
       s.positions().size ? `position actuelle : ${[...s.positions()].map((id) => (id === 0 ? 'Sans planning' : this.ref.libelle(id))).join(', ')}` : '',
@@ -138,12 +137,12 @@ export class PlanningDesktopView {
       .join(' ; ');
     const u = this.auth.user();
     void this.exporter.run(
-      () =>
+      async () =>
         exportPlanningPdf(
           {
             month: s.month(),
             days: s.dayHeaders(),
-            regions,
+            regions: await s.exportRegions(),
             positions: this.ref.activePositions(),
             editeur: u ? `${u.grade ?? ''} ${u.prenom} ${u.nom}`.trim() : '',
             filtre: filtre || null,
