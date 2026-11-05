@@ -128,9 +128,6 @@ importers:
       '@rni/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      html2canvas-pro:
-        specifier: 2.5.2
-        version: 2.5.2
       jspdf:
         specifier: ^4.2.1
         version: 4.2.1
@@ -140,6 +137,9 @@ importers:
       leaflet.markercluster:
         specifier: 1.5.3
         version: 1.5.3(leaflet@1.9.4)
+      modern-screenshot:
+        specifier: 4.7.0
+        version: 4.7.0
       rxjs:
         specifier: ~7.8.0
         version: 7.8.2
@@ -2379,10 +2379,6 @@ packages:
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
 
-  html2canvas-pro@2.5.2:
-    resolution: {integrity: sha512-uka+0oVG/yB4B7U9M/+aJFF0aKZVmMWZKi4unemkQh537cLu3jXPvZtXakTuPl3taOI+O43RhuV6kn2igk1Z6g==}
-    engines: {node: '>=24.0.0'}
-
   html2canvas@1.4.1:
     resolution: {integrity: sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==}
     engines: {node: '>=8.0.0'}
@@ -2692,6 +2688,9 @@ packages:
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
+
+  modern-screenshot@4.7.0:
+    resolution: {integrity: sha512-9YxN+ddPSMMlhylOv25VHzXrl9u67QRxoh7+SEewGtgUw7t6hHTrjptSDJUSne9oG4Xk/h2cwG15nIt4Hc9ujg==}
 
   moment-timezone@0.5.48:
     resolution: {integrity: sha512-f22b8LV1gbTO2ms2j2z13MuPogNoh5UzxL3nzNAYKGraILnbGc9NEE6dyiiiLv46DGRb8A4kg8UKWLjPthxBHw==}
@@ -5610,8 +5609,6 @@ snapshots:
 
   html-escaper@2.0.2: {}
 
-  html2canvas-pro@2.5.2: {}
-
   html2canvas@1.4.1:
     dependencies:
       css-line-break: 2.1.0
@@ -5908,6 +5905,8 @@ snapshots:
       brace-expansion: 1.1.21
 
   minimist@1.2.8: {}
+
+  modern-screenshot@4.7.0: {}
 
   moment-timezone@0.5.48:
     dependencies:

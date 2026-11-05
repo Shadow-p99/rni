@@ -32,8 +32,7 @@
             "allowedCommonJsDependencies": [
               "leaflet",
               "leaflet.markercluster",
-              "html2canvas-pro",
-              "html2canvas",
+                            "html2canvas",
               "jspdf",
               "canvg",
               "raf",

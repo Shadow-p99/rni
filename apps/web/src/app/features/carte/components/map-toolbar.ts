@@ -8,7 +8,7 @@ export type CartePanel = 'filtres' | 'fonds' | 'crise';
 @Component({
   selector: 'rni-map-toolbar',
   imports: [DatePipe, Spinner],
-  host: { class: 'no-print flex max-w-[calc(100%-1.5rem)] flex-wrap gap-2', 'data-html2canvas-ignore': '' },
+  host: { class: 'no-print flex max-w-[calc(100%-1.5rem)] flex-wrap gap-2', 'data-export-ignore': '' },
   template: `
     <button type="button" class="btn-secondary shadow" [class.!bg-rni-100]="panel() === 'filtres'" [attr.aria-pressed]="panel() === 'filtres'" (click)="toggle('filtres')">
       ⚑ Filtres <span class="text-xs text-slate-500">({{ visibleCount() }}/{{ totalCount() }})</span>

@@ -19,10 +19,10 @@
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
     "@rni/shared": "workspace:*",
-    "html2canvas-pro": "2.5.2",
     "jspdf": "^4.2.1",
     "leaflet": "1.9.4",
     "leaflet.markercluster": "1.5.3",
+    "modern-screenshot": "4.7.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

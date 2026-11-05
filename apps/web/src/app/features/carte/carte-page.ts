@@ -50,14 +50,14 @@ import { PersonnelCard } from './components/personnel-card';
           (exportPng)="exportPng()"
         />
         @if (store.points.error(); as e) {
-          <div class="card no-print shadow-lg" data-html2canvas-ignore>
+          <div class="card no-print shadow-lg" data-export-ignore>
             <rni-async-view [error]="e" (retry)="store.refresh()" />
           </div>
         } @else if (store.staleError(); as e) {
-          <rni-error-panel class="no-print shadow" data-html2canvas-ignore [error]="e" [retryable]="true" (retry)="store.refresh()" />
+          <rni-error-panel class="no-print shadow" data-export-ignore [error]="e" [retryable]="true" (retry)="store.refresh()" />
         }
         @if (panel()) {
-          <div class="card no-print p-3 text-sm shadow-lg" data-html2canvas-ignore>
+          <div class="card no-print p-3 text-sm shadow-lg" data-export-ignore>
             @switch (panel()) {
               @case ('filtres') {
                 <rni-filters-panel [value]="store.filters()" (positionToggle)="store.toggleFilter($event)" (toggleAll)="store.toggleAllFilters()" />
@@ -86,7 +86,7 @@ import { PersonnelCard } from './components/personnel-card';
       </div>
 
       @if (store.placingCrise()) {
-        <div class="no-print absolute top-3 left-1/2 z-[950] -translate-x-1/2 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white shadow" data-html2canvas-ignore role="status">
+        <div class="no-print absolute top-3 left-1/2 z-[950] -translate-x-1/2 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white shadow" data-export-ignore role="status">
           Cliquez sur la carte pour placer la crise
           <button type="button" class="ml-2 underline" (click)="store.placingCrise.set(false)">Annuler</button>
         </div>

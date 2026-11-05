@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { ToastService } from '../notifications/toast.service';
-import { exportElementToPdf, exportElementToPng } from './html-export';
+import { BlankExportError, TaintedExportError, exportElementToPdf, exportElementToPng } from './html-export';
 
 /** Exports (PDF / PNG) avec indicateur d'activité et gestion d'échec. */
 @Injectable({ providedIn: 'root' })
@@ -13,10 +13,7 @@ export class ExportService {
   }
 
   png(el: HTMLElement | undefined | null, filename: string): Promise<boolean> {
-    return this.run(
-      () => exportElementToPng(this.require(el), filename),
-      'La capture a échoué (le fond cartographique n’autorise peut-être pas la copie d’image).',
-    );
+    return this.run(() => exportElementToPng(this.require(el), filename), 'La capture de la carte a échoué.');
   }
 
   /** Exécute un export quelconque (ex. génération PDF d'une fiche). */
@@ -28,7 +25,7 @@ export class ExportService {
       return true;
     } catch (e) {
       console.error('[RNI] export', e);
-      this.toasts.error('Export impossible', failure);
+      this.toasts.error('Export impossible', explain(e, failure));
       return false;
     } finally {
       this.busy.set(false);
@@ -39,4 +36,13 @@ export class ExportService {
     if (!el) throw new Error('Élément à exporter introuvable');
     return el;
   }
+}
+
+/** Message compréhensible selon la cause de l'échec. */
+function explain(e: unknown, fallback: string): string {
+  if (e instanceof TaintedExportError) {
+    return 'Le fond cartographique n’autorise pas la copie d’image (CORS) : changez de fond (OpenStreetMap) ou contactez l’administrateur.';
+  }
+  if (e instanceof BlankExportError) return `${fallback} L’image obtenue est vide : réessayez une fois la carte entièrement affichée.`;
+  return fallback;
 }
