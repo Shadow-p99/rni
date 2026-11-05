@@ -1,5 +1,6 @@
 /**
- * Exports image / PDF d'un élément de la page.
+ * Export image (PNG) d'un élément de la page — la carte. Les PDF (planning, fiches de crise) sont
+ * dessinés à partir des données avec jsPDF, sans capture d'écran.
  *
  * Rendu par **le navigateur lui-même** (modern-screenshot : clone du DOM dans un SVG
  * `foreignObject`) et non par une réimplémentation du CSS : fidèle quelles que soient les
@@ -81,28 +82,6 @@ function download(href: string, filename: string): void {
   a.href = href;
   a.download = filename;
   a.click();
-}
-
-/** Export d'un élément HTML en PDF A4, paginé si nécessaire. */
-export async function exportElementToPdf(el: HTMLElement, filename: string, orientation: 'landscape' | 'portrait' = 'landscape'): Promise<void> {
-  const [canvas, { jsPDF }] = await Promise.all([renderToCanvas(el, 2), import('jspdf')]);
-  assertNotBlank(canvas);
-  const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 8;
-  const w = pageW - margin * 2;
-  const pxPerMm = canvas.width / w;
-  const sliceH = Math.floor((pageH - margin * 2) * pxPerMm);
-  for (let y = 0, page = 0; y < canvas.height; y += sliceH, page++) {
-    const slice = document.createElement('canvas');
-    slice.width = canvas.width;
-    slice.height = Math.min(sliceH, canvas.height - y);
-    slice.getContext('2d')!.drawImage(canvas, 0, y, canvas.width, slice.height, 0, 0, canvas.width, slice.height);
-    if (page > 0) pdf.addPage();
-    pdf.addImage(slice.toDataURL('image/png'), 'PNG', margin, margin, w, slice.height / pxPerMm);
-  }
-  pdf.save(filename);
 }
 
 /** Capture PNG d'un élément (export de la carte). */

@@ -1,4 +1,4 @@
-import { Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { Creneau, MAX_PLANNING_MATCHES } from '@rni/shared';
 import { AuthService } from '../../../core/auth/auth.service';
 import { ExportService } from '../../../core/export/export.service';
@@ -12,6 +12,7 @@ import { CellClick, RangeSelect } from './planning-grid';
 import { PlanningFormInit, PlanningSlotDialog } from '../components/planning-slot-dialog';
 import { RegionSection } from './region-section';
 import { PlanningDesktopStore } from './planning-desktop.store';
+import { exportPlanningPdf } from '../planning-pdf';
 
 /** Planning — interface bureau : calendrier mensuel par région (§5.1). */
 @Component({
@@ -55,7 +56,7 @@ import { PlanningDesktopStore } from './planning-desktop.store';
       }
 
       @if (store.regions().length) {
-        <div #print class="flex flex-col gap-3">
+        <div class="flex flex-col gap-3">
           @for (r of store.regions(); track r.id_region) {
             <rni-region-section
               [region]="r"
@@ -97,7 +98,6 @@ export class PlanningDesktopView {
   protected readonly ref = inject(ReferentielService);
   protected readonly store = inject(PlanningDesktopStore);
   protected readonly exporter = inject(ExportService);
-  private readonly printEl = viewChild<ElementRef<HTMLElement>>('print');
   protected readonly form = signal<PlanningFormInit | null>(null);
   protected readonly Jour = Creneau.JOUR;
   protected readonly maxMatches = MAX_PLANNING_MATCHES;
@@ -126,7 +126,31 @@ export class PlanningDesktopView {
     this.store.refresh();
   }
 
+  /** PDF dessiné à partir des données affichées (régions dépliées, filtres actifs). */
   exportPdf(): void {
-    void this.exporter.pdf(this.printEl()?.nativeElement, `planning_rni_${this.store.month()}.pdf`, 'landscape');
+    const s = this.store;
+    const regions = s.regions().filter((r) => r.expanded && r.loaded && r.rows.length > 0);
+    const filtre = [
+      s.query() ? `recherche « ${s.query()} »` : '',
+      s.positions().size ? `position actuelle : ${[...s.positions()].map((id) => (id === 0 ? 'Sans planning' : this.ref.libelle(id))).join(', ')}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ; ');
+    const u = this.auth.user();
+    void this.exporter.run(
+      () =>
+        exportPlanningPdf(
+          {
+            month: s.month(),
+            days: s.dayHeaders(),
+            regions,
+            positions: this.ref.activePositions(),
+            editeur: u ? `${u.grade ?? ''} ${u.prenom} ${u.nom}`.trim() : '',
+            filtre: filtre || null,
+          },
+          `planning_rni_${s.month()}.pdf`,
+        ),
+      'Le PDF du planning n’a pas pu être généré.',
+    );
   }
 }
