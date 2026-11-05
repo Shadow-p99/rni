@@ -91,4 +91,26 @@ export class AdminLogSplunk extends Model {
 
   @Column(DataType.STRING(8))
   institution: string;
+
+  /** false : requête refusée avant authentification (nigend inconnu, hors reverse-proxy). */
+  @Column(DataType.BOOLEAN)
+  authentifie: boolean | null;
+
+  @Column(DataType.INTEGER)
+  duree_ms: number | null;
+
+  @Column(DataType.INTEGER)
+  taille_reponse: number | null;
+
+  @Column(DataType.STRING(128))
+  request_id: string | null;
+
+  @Column(DataType.STRING(256))
+  user_agent: string | null;
+
+  @Column(DataType.STRING(128))
+  hote: string | null;
+
+  @Column(DataType.INTEGER)
+  pid: number | null;
 }

@@ -216,3 +216,17 @@ Branche : `claude/prod-ready-audit`. Objet : rendre l'application exploitable en
 - Mesures sans cache (5 100 personnels, 121 000 plannings) : écart de 0 à +12 % par rapport au
   SQL natif, après passage des grosses lectures en `raw: true`. Avec le cache (production), les
   temps sont inchangés.
+
+## 8. Complément : audit Splunk (BR-SEC-1)
+
+- L'intercepteur est remplacé par un **middleware**, premier maillon de la chaîne : les requêtes
+  refusées (401, 403, hors reverse-proxy, 404) sont désormais tracées. L'intercepteur, qui
+  s'exécutait après la garde d'authentification, les manquait.
+- L'adresse IP est lue à travers les proxys de confiance (`TRUST_PROXY`). Avant, la première valeur
+  de `X-Forwarded-For` était prise sans contrôle et pouvait être falsifiée.
+- Écriture par lots (2 s) avec le modèle `AdminLogSplunk`. En cas de panne de la base, les lignes
+  restent en mémoire puis sont réécrites.
+- Migration 2.9.0 : colonnes `authentifie`, `duree_ms`, `taille_reponse`, `request_id`,
+  `user_agent`, `hote`, `pid` ; vue `v_log_splunk_export` pour le job Talend ; purge selon
+  `rni.splunk.retention_days`.
+- Guide d'extraction : `docs/SPLUNK-TALEND.md`.

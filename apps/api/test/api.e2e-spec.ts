@@ -12,7 +12,9 @@ import { LogPersistService } from '../src/common/supervision/log-persist.service
 import { MetricsService } from '../src/common/supervision/metrics.service.js';
 import { CacheService } from '../src/common/cache/cache.service.js';
 import { Op } from 'sequelize';
-import { ParamApp, Planning, RefUser } from '../src/database/models/index.js';
+import { AdminLogSplunk, ParamApp, Planning, RefUser } from '../src/database/models/index.js';
+import { SplunkAuditService } from '../src/common/audit/splunk-audit.service.js';
+import pg from 'pg';
 import { ParamService } from '../src/modules/external/param.service.js';
 
 /** Identités du jeu de données fictif (db/dev/90-seed-dev.sql). */
@@ -671,6 +673,87 @@ describe('API RNI (e2e)', () => {
       const cleared = (await as(SUPER_ADMIN).del('/admin/cache')).body;
       expect(cleared.entries).toBeLessThanOrEqual(1);
       expect(app.get(CacheService).stats().entries).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe('audit Splunk (BR-SEC-1) : middleware et export Talend', () => {
+    const rows = async (requestId: string) => {
+      await app.get(SplunkAuditService).flush();
+      return AdminLogSplunk.findAll({ where: { request_id: requestId }, raw: true });
+    };
+    const rid = (r: { headers: Record<string, string> }) => r.headers['x-request-id'];
+
+    it('requête métier : une ligne complète (utilisateur, rôle, unité, statut, durée, corrélation)', async () => {
+      const r = await as(REFERENT_IDF).get(`/planning/timetable?month=${new Date().toISOString().slice(0, 7)}&region=11`).set('User-Agent', 'test-e2e');
+      const [row] = await rows(rid(r));
+      expect(row).toMatchObject({
+        methode: 'GET',
+        route: '/rni/api/planning/timetable',
+        statut: 200,
+        authentifie: true,
+        rio_user: REFERENT_IDF,
+        role: expect.stringMatching(/Référent/),
+        code_unite: expect.any(String),
+        institution: 'GN',
+        user_agent: 'test-e2e',
+        pid: process.pid,
+      });
+      expect(row.duree_ms).toBeGreaterThanOrEqual(0);
+      expect(row.taille_reponse).toBeGreaterThan(0);
+      expect(row.ip).toBeTruthy();
+    });
+
+    it('requêtes refusées avant le contrôleur : 401 (nigend inconnu) et 403 (profil) tracées', async () => {
+      const unknown = await as('999999').get('/users/me');
+      expect(unknown.status).toBe(401);
+      expect((await rows(rid(unknown)))[0]).toMatchObject({ statut: 401, authentifie: false, rio_user: '999999', role: null });
+      const denied = await as(NEGO_IDF).get('/users?page=1');
+      expect(denied.status).toBe(403);
+      expect((await rows(rid(denied)))[0]).toMatchObject({ statut: 403, authentifie: true, rio_user: NEGO_IDF });
+      const missing = await as(GIGN).get('/planning/999999');
+      expect((await rows(rid(missing)))[0]).toMatchObject({ statut: 404 });
+    });
+
+    it('exclusions : routes hors périmètre BR-SEC-1, sondes et @NoAudit()', async () => {
+      for (const r of [
+        await as(GIGN).get('/referentiel/positions'),
+        await as(GIGN).get('/service/alive'),
+        await request(app.getHttpServer()).get('/rni/api/health/ready'),
+        await as(SUPER_ADMIN).get('/admin/dashboard'),
+      ]) {
+        expect(await rows(rid(r))).toHaveLength(0);
+      }
+      // Route d'administration sans @NoAudit : auditée
+      expect(await rows(rid(await as(SUPER_ADMIN).get('/admin/perimetres')))).toHaveLength(1);
+    });
+
+    it('export Talend : lecture incrémentale de v_log_splunk_export (filigrane id_log)', async () => {
+      // Simule le job Talend : connexion directe, comme tPostgresqlInput
+      const client = new pg.Client({
+        host: process.env.PG_HOST ?? 'localhost',
+        user: process.env.PG_USER ?? 'rni',
+        password: process.env.PG_PASSWORD ?? 'rni',
+        database: process.env.PG_DATABASE,
+      });
+      await client.connect();
+      try {
+        const extract = (after: number) =>
+          client.query(
+            `SELECT * FROM v_log_splunk_export WHERE id_log > $1 AND horodatage < to_char((now() + interval '1 minute') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') ORDER BY id_log`,
+            [after],
+          );
+        await app.get(SplunkAuditService).flush();
+        const first = await extract(0);
+        const watermark = Number(first.rows.at(-1).id_log);
+        const r = await as(GIGN).get('/users/me');
+        await app.get(SplunkAuditService).flush();
+        const next = (await extract(watermark)).rows;
+        expect(next.map((x) => x.request_id)).toEqual([rid(r)]);
+        expect(next[0].horodatage).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+        expect(next[0]).toMatchObject({ institution: 'GN', methode: 'GET', route: '/rni/api/users/me', statut: 200, rio_user: GIGN });
+      } finally {
+        await client.end();
+      }
     });
   });
 

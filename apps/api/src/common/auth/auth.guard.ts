@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import { UserDetail } from '../../database/models/index.js';
 import { BusinessException } from '../business.exception.js';
 import type { RniRequest, RniUser } from './current-user.js';
-import { ALLOW_UNKNOWN_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
+import { ALLOW_UNKNOWN_KEY, NO_AUDIT_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
 import { PerimetreService } from './perimetre.service.js';
 import { requestStore } from '../runtime/request-store.js';
 import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
@@ -50,9 +50,11 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const targets = [ctx.getHandler(), ctx.getClass()];
+    const req = ctx.switchToHttp().getRequest<Request & RniRequest & { rniNoAudit?: boolean }>();
+    // @NoAudit() : lu ici (avant tout refus) pour le middleware d'audit Splunk
+    req.rniNoAudit = this.reflector.getAllAndOverride<boolean>(NO_AUDIT_KEY, targets) ?? false;
     if (this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, targets)) return true;
 
-    const req = ctx.switchToHttp().getRequest<Request & RniRequest>();
     const allowUnknown = this.reflector.getAllAndOverride<boolean>(ALLOW_UNKNOWN_KEY, targets) ?? false;
     const nigend = headerValue(req, 'nigend');
 

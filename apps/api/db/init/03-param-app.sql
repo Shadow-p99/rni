@@ -35,4 +35,5 @@ INSERT INTO t_param_app (cle_param_app, valeur, description, is_front) VALUES
   ('rni.dashboard.active_minutes',         '5',                         'Fenêtre (minutes) au-delà de laquelle un utilisateur n''est plus compté comme connecté', false),
   ('rni.log.expires_at',                   '',                          'Fin de validité (ISO 8601) des réglages rni.log.level / contexts / sql ; vide = permanent', false),
   ('rni.log.updated_by',                   '',                          'Nigend de la dernière modification des réglages de journalisation', false),
-  ('rni.log.updated_at',                   '',                          'Date (ISO 8601) de la dernière modification des réglages de journalisation', false);
+  ('rni.log.updated_at',                   '',                          'Date (ISO 8601) de la dernière modification des réglages de journalisation', false),
+  ('rni.splunk.retention_days',            '30',                        'Conservation (jours) des lignes d''audit Splunk en base, après export Talend', false);

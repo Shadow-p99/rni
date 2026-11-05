@@ -268,7 +268,15 @@ CREATE TABLE t_admin_log_splunk (
   rio_user     varchar(8),
   code_unite   varchar(10),
   role         varchar(64),
-  institution  varchar(8) NOT NULL DEFAULT 'GN'
+  institution  varchar(8) NOT NULL DEFAULT 'GN',
+  -- 2.9.0 : corrélation, durée, contexte (export Talend → Splunk, cf. docs/SPLUNK-TALEND.md)
+  authentifie     boolean,
+  duree_ms        integer,
+  taille_reponse  integer,
+  request_id      varchar(128),
+  user_agent      varchar(256),
+  hote            varchar(128),
+  pid             integer
 );
 CREATE INDEX ix_log_splunk_horodatage ON t_admin_log_splunk (horodatage);
 
@@ -326,3 +334,24 @@ SELECT ru.*,
   LEFT JOIN ref_unite u ON u.code_unite = ru.code_unite
   LEFT JOIN lien_departement_region d ON d.id_departement = u.id_departement
   LEFT JOIN ref_regions r ON r.id_region = ru.id_region;
+
+-- Vue lue par le job Talend : horodatage ISO 8601 UTC, champs prêts pour Splunk
+CREATE VIEW v_log_splunk_export AS
+SELECT id_log,
+       to_char(horodatage AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS horodatage,
+       institution,
+       ip,
+       methode,
+       route,
+       statut,
+       authentifie,
+       rio_user,
+       code_unite,
+       role,
+       duree_ms,
+       taille_reponse,
+       request_id,
+       user_agent,
+       hote,
+       pid
+  FROM t_admin_log_splunk;

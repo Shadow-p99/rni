@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { Op } from 'sequelize';
 import { Db } from '../../database/db.service.js';
-import { AppLog, RequestMetric, UserActivity } from '../../database/models/index.js';
+import { AdminLogSplunk, AppLog, RequestMetric, UserActivity } from '../../database/models/index.js';
 import { tryAdvisoryXactLock } from '../../database/postgres.js';
 import { ParamService } from '../../modules/external/param.service.js';
 import { CacheService, CacheTag } from '../cache/cache.service.js';
@@ -97,7 +97,7 @@ export class LogPersistService implements OnApplicationBootstrap, OnApplicationS
         const n = Number(await this.params.get(key));
         return Number.isInteger(n) && n > 0 ? n : def;
       };
-      const [logs, metrics] = await Promise.all([days('rni.log.retention_days', 14), days('rni.metrics.retention_days', 30)]);
+      const [logs, metrics, splunk] = await Promise.all([days('rni.log.retention_days', 14), days('rni.metrics.retention_days', 30), days('rni.splunk.retention_days', 30)]);
       // Verrou lié à la transaction (même connexion du pool, libéré au commit)
       const counts = await this.db.transaction(async (transaction) => {
         if (!(await tryAdvisoryXactLock(this.db.sequelize, PURGE_LOCK, transaction))) return null;
@@ -107,10 +107,14 @@ export class LogPersistService implements OnApplicationBootstrap, OnApplicationS
           await AppLog.destroy({ where: { horodatage: { [Op.lt]: before(logs) } }, ...opts }),
           await RequestMetric.destroy({ where: { minute: { [Op.lt]: before(metrics) } }, ...opts }),
           await UserActivity.destroy({ where: { derniere_activite: { [Op.lt]: before(metrics) } }, ...opts }),
+          // Lignes d'audit déjà exportées par Talend (rétention de sécurité)
+          await AdminLogSplunk.destroy({ where: { horodatage: { [Op.lt]: before(splunk) } }, ...opts }),
         ];
       });
       if (counts && counts.some((n) => n > 0)) {
-        this.logger.log(`Purge : ${counts[0]} ligne(s) de journal (> ${logs} j), ${counts[1]} métrique(s) et ${counts[2]} activité(s) (> ${metrics} j)`);
+        this.logger.log(
+          `Purge : ${counts[0]} ligne(s) de journal (> ${logs} j), ${counts[1]} métrique(s) et ${counts[2]} activité(s) (> ${metrics} j), ${counts[3]} ligne(s) d'audit Splunk (> ${splunk} j)`,
+        );
       }
     } catch (e) {
       this.logger.warn(`Purge des données de supervision impossible : ${(e as Error).message}`);

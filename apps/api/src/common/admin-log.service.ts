@@ -1,19 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { AdminLog, AdminLogSplunk } from '../database/models/index.js';
+import { AdminLog } from '../database/models/index.js';
 
-export interface SplunkEntry {
-  ip: string | null;
-  route: string;
-  methode: string;
-  statut: number | null;
-  rio_user: string | null;
-  code_unite: string | null;
-  role: string | null;
-}
 
 /**
- * Journaux d'audit (BR-SEC-1, BR-SEC-2). Une indisponibilité de la base ne doit jamais
+ * Journaux d'audit métier (BR-SEC-2, BR-SEC-3) ; l'audit Splunk (BR-SEC-1) est dans common/audit. Une indisponibilité de la base ne doit jamais
  * empêcher la réponse (dette §9.10) : repli sur la journalisation applicative.
  */
 @Injectable()
@@ -22,7 +13,6 @@ export class AdminLogService {
 
   constructor(
     @InjectModel(AdminLog) private readonly logs: typeof AdminLog,
-    @InjectModel(AdminLogSplunk) private readonly splunk: typeof AdminLogSplunk,
   ) {}
 
   async business(entry: { code: string; nigend: string | null; methode: string; url: string; body: unknown; description: string }): Promise<void> {
@@ -38,14 +28,6 @@ export class AdminLogService {
       });
     } catch (e) {
       this.logger.error(`[${entry.code}] ${entry.methode} ${entry.url} (${entry.nigend ?? '-'}) ${description} — journal en base KO : ${(e as Error).message}`);
-    }
-  }
-
-  async audit(entry: SplunkEntry): Promise<void> {
-    try {
-      await this.splunk.create({ ...entry, route: entry.route.slice(0, 1024), institution: 'GN' });
-    } catch (e) {
-      this.logger.warn(`Journal Splunk KO (${entry.methode} ${entry.route}) : ${(e as Error).message}`);
     }
   }
 

@@ -86,7 +86,7 @@ navigateur ──► reverse-proxy SSO (en-têtes nigend, cn, title…) ──�
 | Dossier | Contenu |
 |---|---|
 | `common/auth` | `AuthGuard` global (BR-AUTH-1/2 : 401 sans `nigend` ou nigend non habilité ; matrice déclarative `@Profiles`), `PerimetreService` (BR-AUTH-6 : périmètre par profil et par module, paramétré dans `t_perimetre_profil`), simulation SSO de dev |
-| `common` | Filtre d'erreurs (BR-SEC-2 : `t_admin_logs` + libellé `t_admin_messages`, repli si la base tombe), intercepteur d'audit Splunk (BR-SEC-1 : `t_admin_log_splunk`) |
+| `common` | Filtre d'erreurs (BR-SEC-2 : `t_admin_logs` + libellé `t_admin_messages`, repli si la base tombe), audit Splunk (BR-SEC-1 : middleware `common/audit` → `t_admin_log_splunk`, exporté par Talend, cf. [`docs/SPLUNK-TALEND.md`](docs/SPLUNK-TALEND.md)) |
 | `database` | Modèles Sequelize, accès SQL **paramétré** (`Db`) |
 | `modules/planning` | Calendrier mensuel, GeoJSON de la carte, création / modification / suppression / **insertion transactionnelle** |
 | `modules/region` | Régions visibles, compteurs au créneau courant, compteurs mobiles par jour |
