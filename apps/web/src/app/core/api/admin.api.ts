@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { AdminDashboardDto, AppLogPageDto, AppLogQuery, LogSettingsDto, LogSettingsUpdateDto } from '@rni/shared';
+import type { AuditPageDto, AuditQuery, AdminDashboardDto, AppLogPageDto, AppLogQuery, LogSettingsDto, LogSettingsUpdateDto } from '@rni/shared';
 import { API, RequestOptions, ctx, toParams } from './api.config';
 
 /** Supervision (super administrateur) : tableau de bord et journal applicatif. */
@@ -10,6 +10,11 @@ export class AdminApi {
 
   dashboard(opts?: RequestOptions) {
     return this.http.get<AdminDashboardDto>(`${API}/admin/dashboard`, ctx(opts));
+  }
+
+  /** Audit des requêtes (t_admin_log_splunk). */
+  audit(q: AuditQuery, opts?: RequestOptions) {
+    return this.http.get<AuditPageDto>(`${API}/admin/audit`, { params: toParams(q), ...ctx(opts) });
   }
 
   journal(q: AppLogQuery, opts?: RequestOptions) {

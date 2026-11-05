@@ -65,6 +65,11 @@ export const routes: Routes = [
             loadComponent: () => import('./features/admin/journal/journal-page').then((m) => m.JournalPage),
           },
           {
+            path: 'audit',
+            title: 'Audit des requêtes — Administration RNI',
+            loadComponent: () => import('./features/admin/audit/audit-page').then((m) => m.AuditPage),
+          },
+          {
             path: 'journalisation',
             title: 'Réglages des journaux — Administration RNI',
             canDeactivate: [unsavedChangesGuard],

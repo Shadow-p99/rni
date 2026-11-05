@@ -714,6 +714,26 @@ describe('API RNI (e2e)', () => {
       expect((await rows(rid(missing)))[0]).toMatchObject({ statut: 404 });
     });
 
+    it('consultation (Administration › Audit des requêtes) : filtres et pagination', async () => {
+      expect((await as(GIGN).get('/admin/audit')).status).toBe(403);
+      const denied = await as(NEGO_IDF).get('/users?page=2');
+      await app.get(SplunkAuditService).flush();
+      const byId = (await as(SUPER_ADMIN).get(`/admin/audit?request_id=${rid(denied)}`)).body;
+      expect(byId.items).toHaveLength(1);
+      expect(byId.items[0]).toMatchObject({ statut: 403, rio_user: NEGO_IDF, methode: 'GET', authentifie: true });
+      const refus = (await as(SUPER_ADMIN).get(`/admin/audit?nigend=${NEGO_IDF}&statut=refus&route=/users`)).body.items as { statut: number; rio_user: string; route: string }[];
+      expect(refus.length).toBeGreaterThan(0);
+      expect(refus.every((r) => [401, 403].includes(r.statut) && r.rio_user === NEGO_IDF && r.route.includes('/users'))).toBe(true);
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+      const p1 = (await as(SUPER_ADMIN).get(`/admin/audit?limite=2&du=${today}&au=${today}`)).body;
+      expect(p1.items).toHaveLength(2);
+      const p2 = (await as(SUPER_ADMIN).get(`/admin/audit?limite=2&avant=${p1.suivant}`)).body;
+      expect(p2.items[0].id_log).toBeLessThan(p1.items[1].id_log);
+      expect((await as(SUPER_ADMIN).get('/admin/audit?du=2099-01-01')).body.items).toEqual([]);
+      expect((await as(SUPER_ADMIN).get('/admin/audit?statut=abc')).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).get('/admin/audit?non_authentifie=true')).body.items.every((r: { authentifie: boolean }) => r.authentifie === false)).toBe(true);
+    });
+
     it('exclusions : routes hors périmètre BR-SEC-1, sondes et @NoAudit()', async () => {
       for (const r of [
         await as(GIGN).get('/referentiel/positions'),

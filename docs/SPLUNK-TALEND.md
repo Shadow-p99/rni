@@ -101,6 +101,15 @@ Exemple d'événement :
 - **Indisponibilité de la base** : l'API garde jusqu'à 20 000 lignes en mémoire et les réécrit au
   retour de la base, ce qui est journalisé. Au-delà, une erreur indique le nombre de lignes perdues.
 
+## Consultation dans l'application
+
+**Administration › Audit des requêtes** affiche ces lignes du plus récent au plus ancien, avec des
+filtres : nigend, fragment de route, méthode, résultat (succès, 4xx, refus 401 / 403, 404, 5xx),
+adresse IP, période, identifiant de requête, requêtes refusées avant authentification. Le détail d'une
+ligne renvoie vers le **Journal** de la même requête (même `request_id`) ; les lignes affichées
+s'exportent en CSV. Réservé au droit « Administrer l'application » ; la consultation n'est pas
+elle-même auditée. Index de recherche : migration 2.11.0.
+
 ## Vérifications
 
 ```sql

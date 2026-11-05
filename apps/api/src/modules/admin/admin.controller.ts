@@ -1,7 +1,9 @@
 import { Body, Controller, Delete, Get, HttpCode, Put, Query } from '@nestjs/common';
+import type { AuditQuery } from '@rni/shared';
 import { LOG_CONTEXT_PATTERN, LOG_DB_THRESHOLDS, LOG_DURATIONS, LOG_THRESHOLDS, MAX_LOG_CONTEXTS, type AppLogLevel, type LogContextLevel, type LogSettingsUpdateDto, type LogThreshold } from '@rni/shared';
 import { NoAudit } from '../../common/auth/decorators.js';
 import { DashboardService } from './dashboard.service.js';
+import { AuditQueryService } from './audit-query.service.js';
 import { Droit, PERIMETRES, PERIMETRE_MODULES, type Perimetre, type PerimetreModule, type PerimetreUpdateDto } from '@rni/shared';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, Matches, Max, Min, ValidateNested } from 'class-validator';
@@ -88,7 +90,18 @@ export class AdminController {
     private readonly notify: CacheNotifyService,
     private readonly logs: LogSettingsService,
     private readonly dashboardService: DashboardService,
+    private readonly audit: AuditQueryService,
   ) {}
+
+  /**
+   * Audit des requêtes (t_admin_log_splunk) : qui a appelé quoi, quand, avec quel résultat.
+   * Non audité lui-même (consultation fréquente, pas d'action métier).
+   */
+  @Get('audit')
+  @NoAudit()
+  auditSearch(@Query() q: AuditQuery) {
+    return this.audit.search(q);
+  }
 
   /** Tableau de bord : activité, performances, erreurs, utilisateurs connectés, état du système. */
   @Get('dashboard')

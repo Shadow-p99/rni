@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type { AppLogDto, AppLogLevel } from '@rni/shared';
 import { ErrorPanel } from '../../../shared/ui/error-panel';
 import { PageHeader } from '../../../shared/ui/page-header';
@@ -14,7 +14,7 @@ const LEVELS = new Set<string>(LOG_LEVEL_OPTIONS.map((o) => o.value));
 /** Journal applicatif conservé en base (toutes instances), avec filtres et suivi en direct. */
 @Component({
   selector: 'rni-journal-page',
-  imports: [PageHeader, ErrorPanel, Spinner, LogLevelBadge, FormsModule],
+  imports: [PageHeader, ErrorPanel, Spinner, LogLevelBadge, FormsModule, RouterLink],
   providers: [JournalStore],
   template: `
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-3 p-3 desk:p-4">
@@ -99,6 +99,9 @@ const LEVELS = new Set<string>(LOG_LEVEL_OPTIONS.map((o) => o.value));
                     }
                     @if (l.contexte) {
                       <button type="button" class="text-rni-700 hover:underline" (click)="filterBy('contexte', l.contexte)">contexte {{ l.contexte }}</button>
+                    }
+                    @if (l.request_id) {
+                      <a class="text-rni-700 hover:underline" routerLink="../audit" [queryParams]="{ request_id: l.request_id }">audit de la requête</a>
                     }
                   </div>
                   @if (l.pile) {

@@ -666,3 +666,52 @@ export interface MessageDto {
   libelle: string;
   type: MessageType;
 }
+
+// -----------------------------------------------------------------------------
+// Audit des requêtes (t_admin_log_splunk), Administration › Audit des requêtes
+// -----------------------------------------------------------------------------
+
+/** Filtre de statut : famille de codes, refus d'accès (401 / 403) ou code exact (« 404 »). */
+export type AuditStatutFiltre = '' | '2xx' | '3xx' | '4xx' | '5xx' | 'refus' | `${number}`;
+
+export interface AuditQuery {
+  nigend?: string;
+  /** Fragment du chemin (ex. « formulaire », « /users/ »). */
+  route?: string;
+  methode?: string;
+  statut?: AuditStatutFiltre;
+  /** Requêtes refusées avant authentification seulement. */
+  non_authentifie?: boolean;
+  request_id?: string;
+  ip?: string;
+  /** Dates (AAAA-MM-JJ, heure de Paris), bornes incluses. */
+  du?: string;
+  au?: string;
+  /** Pagination : identifiants strictement inférieurs. */
+  avant?: number;
+  limite?: number;
+}
+
+export interface AuditLineDto {
+  id_log: number;
+  horodatage: string;
+  methode: string;
+  route: string;
+  statut: number | null;
+  authentifie: boolean | null;
+  rio_user: string | null;
+  role: string | null;
+  code_unite: string | null;
+  ip: string | null;
+  duree_ms: number | null;
+  taille_reponse: number | null;
+  request_id: string | null;
+  user_agent: string | null;
+  hote: string | null;
+  pid: number | null;
+}
+
+export interface AuditPageDto {
+  items: AuditLineDto[];
+  suivant: number | null;
+}
