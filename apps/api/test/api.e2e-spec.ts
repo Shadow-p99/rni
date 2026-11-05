@@ -580,6 +580,27 @@ describe('API RNI (e2e)', () => {
         expect(trace.message).toContain('slow_ms: 1000 → 800');
       });
 
+      it('journal SQL : chaque requête SQL de l’appel consultable dans le Journal, puis désactivé', async () => {
+        const off = await as(NEGO_IDF).get('/formulaire');
+        await app.get(LogPersistService).flush();
+        const sqlOf = async (r: { headers: Record<string, string> }) =>
+          (await as(SUPER_ADMIN).get(`/admin/journal?contexte=SQL&niveau=debug&request_id=${r.headers['x-request-id']}`)).body.items as { niveau: string; message: string }[];
+        expect(await sqlOf(off)).toEqual([]);
+        // Seuil de conservation laissé à « log » : le journal SQL demandé passe outre
+        await as(SUPER_ADMIN).put('/admin/logs', { ...body, sql: true, duree_min: 15 });
+        const on = await as(NEGO_IDF).get('/formulaire');
+        await app.get(LogPersistService).flush();
+        const lines = await sqlOf(on);
+        expect(lines.length).toBeGreaterThan(0);
+        expect(lines.every((l) => l.niveau === 'debug')).toBe(true);
+        expect(lines.some((l) => /SELECT .*FROM "t_formulaire"/.test(l.message))).toBe(true);
+        expect(lines[0].message).toMatch(/^\d+ ms /);
+        await as(SUPER_ADMIN).put('/admin/logs', body);
+        const again = await as(NEGO_IDF).get('/formulaire');
+        await app.get(LogPersistService).flush();
+        expect(await sqlOf(again)).toEqual([]);
+      });
+
       it('réglage temporaire : retour automatique aux valeurs par défaut à l’échéance', async () => {
         await as(SUPER_ADMIN).put('/admin/logs', { ...body, level: 'warn', sql: true, duree_min: 15 });
         // Échéance dépassée (simulée) : chaque processus revient aux défauts et la base est nettoyée

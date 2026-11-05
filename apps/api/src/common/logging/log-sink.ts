@@ -34,10 +34,16 @@ function text(v: unknown): string {
 /**
  * Tampon des journaux à conserver en base (`t_app_logs`), alimenté par RniLogger et vidé par lots
  * (LogPersistService). Indépendant du seuil d'affichage sur la sortie standard : seuil propre
- * `rni.log.db_level`. Le contexte SQL n'est jamais conservé en dessous de warn (volume).
+ * `rni.log.db_level`. Le contexte SQL n'est conservé en dessous de warn que si le journal SQL est
+ * activé (Administration › Réglages des journaux).
  */
 class LogSink {
   level: RniLogLevel = 'log';
+  /**
+   * Journal SQL demandé (`rni.log.sql`, durée limitée) : chaque requête SQL est alors conservée en
+   * base, quel que soit le seuil `rni.log.db_level`, pour être consultée dans le Journal.
+   */
+  sql = false;
   /** Actif quand un écrivain est branché (processus avec base de données). */
   active = false;
   private buffer: LogRow[] = [];
@@ -46,6 +52,7 @@ class LogSink {
   accepts(level: RniLogLevel, context: string | undefined): boolean {
     if (!this.active) return false;
     const belowWarn = LOG_LEVELS.indexOf(level) > LOG_LEVELS.indexOf('warn');
+    if (context === 'SQL' && this.sql) return true;
     if (belowWarn && context && (context === 'SQL' || FRAMEWORK.has(context))) return false;
     return LOG_LEVELS.indexOf(level) <= LOG_LEVELS.indexOf(this.level);
   }

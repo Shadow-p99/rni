@@ -27,6 +27,7 @@ const LEVELS = new Set<string>(LOG_LEVEL_OPTIONS.map((o) => o.value));
               <span class="chip gap-1 bg-green-50 px-1.5 py-0 text-[11px] text-green-800"><span aria-hidden="true">●</span>actif</span>
             }
           </label>
+          <button type="button" class="btn-secondary" (click)="sqlOnly()" title="Requêtes SQL (journal SQL à activer dans « Réglages des journaux »)">Requêtes SQL</button>
           <button type="button" class="btn-secondary" (click)="store.search()" [disabled]="store.loading()">Actualiser</button>
         </ng-container>
       </rni-page-header>
@@ -180,6 +181,12 @@ export class JournalPage {
   protected filterBy(key: 'nigend' | 'request_id' | 'contexte', value: string): void {
     this.draft = { ...this.draft, [key]: value, ...(key === 'request_id' ? { niveau: 'debug' as AppLogLevel } : {}) };
     this.open.set(null);
+    this.apply();
+  }
+
+  /** Requêtes SQL : contexte SQL, tous niveaux (chaque requête est en débogage, les lentes en alerte). */
+  protected sqlOnly(): void {
+    this.draft = { ...EMPTY_FILTER, contexte: 'SQL', niveau: 'debug' };
     this.apply();
   }
 

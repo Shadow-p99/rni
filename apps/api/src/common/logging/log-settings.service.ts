@@ -178,7 +178,9 @@ export class LogSettingsService implements OnApplicationBootstrap, OnApplication
     // Message écrit au niveau « warn » si le nouveau seuil le masquerait (passage en error / warn)
     const quieter = LOG_LEVELS.indexOf(level) < LOG_LEVELS.indexOf('log');
     if (quieter) this.logger.warn(summary);
-    this.apply(level, contexts);
+    // Journal SQL demandé : contexte SQL en debug (sortie standard) et conservé en base (Journal)
+    logSink.sql = sql;
+    this.apply(level, sql && !contexts.has('SQL') ? new Map([...contexts, ['SQL', 'debug']]) : contexts);
     if (!quieter && (!first || level !== previous || contexts.size || sql)) this.logger.log(summary);
   }
 

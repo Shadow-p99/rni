@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { LOG_DB_THRESHOLDS, LOG_THRESHOLDS, type LogThreshold } from '@rni/shared';
 import { HasUnsavedChanges } from '../../../core/platform/unsaved-changes.guard';
 import { AsyncView } from '../../../shared/ui/async-view';
@@ -27,7 +28,7 @@ const DURATIONS: { value: number | null; label: string }[] = [
 /** Réglages de la journalisation (super administrateur), appliqués à chaud à toutes les instances. */
 @Component({
   selector: 'rni-log-settings-page',
-  imports: [PageHeader, AsyncView, ErrorPanel, Toggle, FormsModule],
+  imports: [PageHeader, AsyncView, ErrorPanel, Toggle, FormsModule, RouterLink],
   providers: [LogSettingsStore],
   template: `
     <div class="mx-auto flex w-full max-w-6xl flex-col gap-3 p-3 desk:p-4">
@@ -114,10 +115,13 @@ const DURATIONS: { value: number | null; label: string }[] = [
               <section class="card flex flex-col gap-3 p-3">
                 <rni-toggle
                   label="Journaliser les requêtes SQL"
-                  description="Chaque requête (sans ses valeurs) avec sa durée, niveau débogage du contexte SQL. Volumineux : à réserver au diagnostic."
+                  description="Chaque requête SQL avec sa durée, rattachée à la requête HTTP qui l'a émise, consultable dans le Journal. Le texte SQL contient les valeurs recherchées (nigend, noms…) et le volume est important : à réserver au diagnostic, sur une durée limitée."
                   [checked]="d.sql"
                   (checkedChange)="store.patch({ sql: $event })"
                 />
+                <a class="text-xs text-rni-700 hover:underline" routerLink="../journal" [queryParams]="{ contexte: 'SQL', niveau: 'debug' }">
+                  Voir les requêtes SQL dans le Journal{{ s.applique.sql ? '' : ' (seules les requêtes lentes y figurent tant que le journal SQL est inactif)' }}
+                </a>
                 @if (verbose()) {
                   <div>
                     <h2 class="text-sm font-semibold">Durée de validité</h2>

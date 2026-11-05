@@ -351,13 +351,13 @@ en 60 s.
 |---|---|---|
 | `rni.log.level` | `error` · `warn` · `log` · `debug` · `verbose` · vide | Niveau global (vide ou invalide : variable `LOG_LEVEL`) |
 | `rni.log.contexts` | `PlanningService=debug,HTTP=warn` | Niveau propre à certains contextes, plus bavard ou plus discret que le global |
-| `rni.log.sql` | `true` / `false` | Chaque requête SQL en `debug` (contexte `SQL`), avec sa durée |
+| `rni.log.sql` | `true` / `false` | Chaque requête SQL en `debug` (contexte `SQL`), avec sa durée, conservée dans le Journal et rattachée à sa requête HTTP |
 | `rni.log.slow_ms` | `1000` | Seuil des requêtes HTTP et SQL signalées comme lentes (`warn`) |
 | `rni.log.expires_at` | date ISO ou vide | Fin de validité des trois réglages ci-dessus (vide : permanent) |
 
 ```sql
 -- Diagnostiquer le planning sans inonder le reste
-UPDATE t_param_app SET valeur = 'PlanningService=debug,SQL=debug' WHERE cle_param_app = 'rni.log.contexts';
+UPDATE t_param_app SET valeur = 'PlanningService=debug' WHERE cle_param_app = 'rni.log.contexts';
 UPDATE t_param_app SET valeur = 'true' WHERE cle_param_app = 'rni.log.sql';
 -- Retour à la normale
 UPDATE t_param_app SET valeur = '' WHERE cle_param_app = 'rni.log.contexts';
@@ -367,13 +367,22 @@ UPDATE t_param_app SET valeur = 'false' WHERE cle_param_app = 'rni.log.sql';
 `GET /rni/api/admin/logs` (super administrateur) affiche les réglages appliqués par le processus
 qui répond. Chaque changement est aussi tracé dans le journal (`LogSettingsService`).
 
+**Voir les requêtes SQL.** Activer « Journaliser les requêtes SQL » (Administration › Réglages des
+journaux, durée limitée), puis **Administration › Journal**, bouton « Requêtes SQL » (contexte `SQL`,
+niveau débogage). Pour une requête HTTP donnée : lien « toute la requête » d'une de ses lignes, qui
+affiche ses requêtes SQL avec leur durée. Sans le journal SQL, seules les requêtes SQL plus lentes que
+`rni.log.slow_ms` sont conservées (en alerte).
+
 **Données protégées.** Ne sont jamais journalisés :
 - les paramètres de requête des URL ;
-- les valeurs liées des requêtes SQL ;
 - les jetons des services externes (masqués) ;
 - le contenu des fiches de crise ;
 - les adresses géocodées ;
 - les valeurs du téléphone personnel et du commentaire (seul le nom des champs modifiés apparaît).
+
+Le texte des requêtes SQL (journal SQL, requêtes lentes) contient en revanche les valeurs que Sequelize
+y insère (nigend, termes recherchés) : c'est pourquoi le journal SQL est limité dans le temps et le
+Journal réservé au droit « Administrer l'application ».
 
 ## Tableau de bord d'administration
 
