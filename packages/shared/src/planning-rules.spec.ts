@@ -1,7 +1,6 @@
 import { computeInsertion, validatePlageBounds, minPlanningDate, checkPositionAllowed, clipPlage, splitAround, parseJoursGlissants } from './planning-rules.js';
 import { ErrorCode } from './errors.js';
 import { toSlot } from './creneaux.js';
-import { Profil } from './profils.js';
 import { PosService } from './positions.js';
 
 const today = new Date(2026, 2, 10); // 10 mars 2026
@@ -36,11 +35,12 @@ describe('validatePlageBounds (BR-PLA-3)', () => {
 });
 
 describe('checkPositionAllowed (BR-PLA-4)', () => {
-  it('bloque Alerte/Formateur pour un négociateur, en pose comme en sortie', () => {
-    expect(checkPositionAllowed(Profil.NEGOCIATEUR, PosService.ALERTE)?.code).toBe(ErrorCode.ACTION_NON_AUTORISEE);
-    expect(checkPositionAllowed(Profil.NEGOCIATEUR, PosService.DISPONIBLE, PosService.FORMATEUR)?.code).toBe(ErrorCode.ACTION_NON_AUTORISEE);
-    expect(checkPositionAllowed(Profil.NEGOCIATEUR, PosService.DISPONIBLE, PosService.EN_SERVICE)).toBeNull();
-    expect(checkPositionAllowed(Profil.REFERENT, PosService.ALERTE)).toBeNull();
+  const restricted = [PosService.ALERTE, PosService.FORMATEUR];
+  it('bloque les positions restreintes sans le droit, en pose comme en sortie', () => {
+    expect(checkPositionAllowed(false, restricted, PosService.ALERTE)?.code).toBe(ErrorCode.ACTION_NON_AUTORISEE);
+    expect(checkPositionAllowed(false, restricted, PosService.DISPONIBLE, PosService.FORMATEUR)?.code).toBe(ErrorCode.ACTION_NON_AUTORISEE);
+    expect(checkPositionAllowed(false, restricted, PosService.DISPONIBLE, PosService.EN_SERVICE)).toBeNull();
+    expect(checkPositionAllowed(true, restricted, PosService.ALERTE)).toBeNull();
   });
 });
 

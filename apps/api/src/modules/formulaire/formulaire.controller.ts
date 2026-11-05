@@ -1,14 +1,27 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common';
-import { Profil } from '@rni/shared';
+import { Droit } from '@rni/shared';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
-import { Profiles } from '../../common/auth/decorators.js';
+import { RequireDroit } from '../../common/auth/decorators.js';
+import { FormulaireConfigService } from './formulaire-config.service.js';
 import { FormulaireService } from './formulaire.service.js';
 
-/** BR-FOR-1 appliqué côté serveur (dette §9.3) : profils 2, 5, 6 exclus, y compris en lecture. */
+/**
+ * BR-FOR-1 appliqué côté serveur (dette §9.3) : droit `formulaire.voir` exigé, y compris en
+ * lecture ; chaque action a son droit (Administration › Droits), la portée est contrôlée par le service.
+ */
 @Controller('formulaire')
-@Profiles(Profil.SUPER_ADMIN, Profil.GIGN, Profil.REFERENT, Profil.REFERENT_ADJOINT, Profil.NEGOCIATEUR)
+@RequireDroit(Droit.FORMULAIRE_VOIR)
 export class FormulaireController {
-  constructor(private readonly service: FormulaireService) {}
+  constructor(
+    private readonly service: FormulaireService,
+    private readonly config: FormulaireConfigService,
+  ) {}
+
+  /** Structure de la fiche (libellés, champs obligatoires, types de crise) : paramétrée en base. */
+  @Get('config')
+  structure() {
+    return this.config.config();
+  }
 
   @Get()
   list(
@@ -32,22 +45,26 @@ export class FormulaireController {
   }
 
   @Post()
+  @RequireDroit(Droit.FORMULAIRE_CREER)
   create(@CurrentUser() user: RniUser, @Body() body: Record<string, unknown>) {
     return this.service.create(user, body);
   }
 
   @Put(':id')
+  @RequireDroit(Droit.FORMULAIRE_MODIFIER)
   update(@CurrentUser() user: RniUser, @Param('id', ParseIntPipe) id: number, @Body() body: Record<string, unknown>) {
     return this.service.update(user, id, body);
   }
 
   @Put(':id/close')
+  @RequireDroit(Droit.FORMULAIRE_CLOTURER)
   close(@CurrentUser() user: RniUser, @Param('id', ParseIntPipe) id: number) {
     return this.service.close(user, id);
   }
 
   @Delete(':id')
   @HttpCode(204)
+  @RequireDroit(Droit.FORMULAIRE_SUPPRIMER)
   remove(@CurrentUser() user: RniUser, @Param('id', ParseIntPipe) id: number) {
     return this.service.remove(user, id);
   }

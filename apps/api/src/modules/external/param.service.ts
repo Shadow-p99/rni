@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
-import { ErrorCode, PARAM_JOURS_GLISSANTS, parseJoursGlissants } from '@rni/shared';
+import { ErrorCode, NO_PLANNING_COLOR, PARAM_COULEUR_SANS_PLANNING, PARAM_JOURS_GLISSANTS, parseJoursGlissants } from '@rni/shared';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService, CacheTag, CacheTtl } from '../../common/cache/cache.service.js';
 import { ParamApp } from '../../database/models/index.js';
@@ -66,6 +66,12 @@ export class ParamService {
   }
 
   /** Nombre de jours glissants du planning (`null` : règle M-1). */
+  /** BR-CAR-3 : couleur d'un personnel sans planning (`rni.carte.couleur_sans_planning`). */
+  async couleurSansPlanning(): Promise<string> {
+    const v = (await this.get(PARAM_COULEUR_SANS_PLANNING))?.trim();
+    return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v : NO_PLANNING_COLOR;
+  }
+
   async joursGlissants(): Promise<number | null> {
     return parseJoursGlissants(await this.get(PARAM_JOURS_GLISSANTS));
   }

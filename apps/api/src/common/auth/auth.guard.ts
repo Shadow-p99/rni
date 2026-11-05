@@ -1,19 +1,17 @@
 import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ADMIN_PROFILS, Profil } from '@rni/shared';
+import type { DroitCode } from '@rni/shared';
 import type { Request } from 'express';
 import { UserDetail } from '../../database/models/index.js';
 import { BusinessException } from '../business.exception.js';
 import type { RniRequest, RniUser } from './current-user.js';
-import { ALLOW_UNKNOWN_KEY, NO_AUDIT_KEY, PROFILES_KEY, PUBLIC_KEY } from './decorators.js';
+import { ALLOW_UNKNOWN_KEY, ANY_PROFILE_KEY, DROIT_KEY, NO_AUDIT_KEY, PUBLIC_KEY } from './decorators.js';
+import { DroitsService } from './droits.service.js';
 import { PerimetreService } from './perimetre.service.js';
 import { requestStore } from '../runtime/request-store.js';
 import { CacheService, CacheTag, CacheTtl } from '../cache/cache.service.js';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/** Profils autorisés par défaut en écriture (les profils 2, 5, 6 sont en consultation). */
-const DEFAULT_WRITE_PROFILES: number[] = [...ADMIN_PROFILS, Profil.NEGOCIATEUR];
 
 interface UserRow {
   id_user: number;
@@ -36,7 +34,9 @@ interface UserRow {
 /**
  * Authentification déléguée (BR-AUTH-1..3) : l'identité provient des en-têtes injectés par le
  * reverse-proxy SSO (`nigend`, `cn`, `title`…) ; l'habilitation provient de `ref_user`.
- * Matrice d'autorisation déclarative (`@Profiles`), contrôles fins dans les services.
+ * Autorisation : droit exigé par la route (`@RequireDroit`), accordé ou non au profil en base
+ * (`t_profil_droit`) ; une écriture sans droit déclaré est refusée. Contrôles fins (portée)
+ * dans les services.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -45,6 +45,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly perimetre: PerimetreService,
+    private readonly droits: DroitsService,
     private readonly cache: CacheService,
   ) {}
 
@@ -74,10 +75,16 @@ export class AuthGuard implements CanActivate {
       throw BusinessException.unauthorized(`Nigend ${nigend} non habilité à RNI.`);
     }
 
-    const profiles = this.reflector.getAllAndOverride<number[]>(PROFILES_KEY, targets);
-    const allowed = profiles ?? (SAFE_METHODS.has(req.method) ? null : DEFAULT_WRITE_PROFILES);
-    if (allowed && !allowed.includes(user.id_profil)) {
-      this.logger.warn(`Accès refusé à ${user.nigend} (profil ${user.id_profil}) : ${req.method} ${req.originalUrl.split('?')[0]} réservé aux profils ${allowed.join(', ')}`);
+    const route = `${req.method} ${req.originalUrl.split('?')[0]}`;
+    const required = this.reflector.getAllAndOverride<DroitCode[]>(DROIT_KEY, targets);
+    if (required?.length) {
+      if (!required.some((c) => user.droits[c])) {
+        this.logger.warn(`Accès refusé à ${user.nigend} (profil ${user.id_profil}) : ${route} exige le droit ${required.join(' ou ')}`);
+        throw BusinessException.forbidden();
+      }
+    } else if (!SAFE_METHODS.has(req.method) && !this.reflector.getAllAndOverride<boolean>(ANY_PROFILE_KEY, targets)) {
+      // Écriture sans droit déclaré : refus (oubli de développement, jamais une ouverture involontaire)
+      this.logger.error(`Route d'écriture sans droit déclaré, refusée : ${route}`);
       throw BusinessException.forbidden();
     }
     this.logger.verbose(`Authentifié : ${user.nigend} (profil ${user.id_profil}, région ${user.id_region ?? '-'})`);
@@ -107,6 +114,7 @@ export class AuthGuard implements CanActivate {
       ...row,
       displayname: [title, cn].filter(Boolean).join(' ') || `${row.grade ?? ''} ${row.prenom} ${row.nom}`.trim(),
       perimetres: await this.perimetre.visibleRegions(row.id_profil, row.id_region),
+      ...(await this.droits.forProfil(row.id_profil)),
     };
   }
 }

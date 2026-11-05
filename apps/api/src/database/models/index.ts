@@ -1,6 +1,7 @@
 import { AdminLog, AdminLogSplunk, AdminMessage, ParamApp } from './admin.models.js';
 import { Formulaire } from './formulaire.model.js';
 import { PerimetreProfil } from './perimetre-profil.model.js';
+import { FormulaireChamp, FormulaireSection, ProfilDroit, ProfilGestion, RefDroit, RefTypeCrise } from './parametrage.models.js';
 import { Planning } from './planning.model.js';
 import { RefUser } from './ref-user.model.js';
 import { SchemaMigration } from './schema-migration.model.js';
@@ -20,6 +21,12 @@ import { AppLog, RequestMetric, UserActivity } from './supervision.models.js';
 import { PersonnelRpsi, UserDetail } from './views.models.js';
 
 export {
+  FormulaireChamp,
+  FormulaireSection,
+  ProfilDroit,
+  ProfilGestion,
+  RefDroit,
+  RefTypeCrise,
   AdminLog,
   AdminLogSplunk,
   AdminMessage,
@@ -55,6 +62,12 @@ export const ALL_MODELS = [
   AdminLog,
   AdminLogSplunk,
   PerimetreProfil,
+  RefDroit,
+  ProfilDroit,
+  ProfilGestion,
+  RefTypeCrise,
+  FormulaireSection,
+  FormulaireChamp,
   RefProfil,
   ProfilClassement,
   RefPosService,

@@ -3,19 +3,14 @@ import { InjectModel } from '@nestjs/sequelize';
 import {
   CreateUserDto,
   CurrentUserDto,
+  Droit,
   ErrorCode,
-  GIGN_ONLY_PROFILS,
-  PLANNING_PROFILS,
   Profil,
   RpsiPersonnelDto,
   UpdateUserDto,
   UserDto,
-  assignableProfils,
   geolocIndicatif,
-  isAdminProfil,
-  isNationalAdmin,
   isValidPhone,
-  listableProfils,
   MAX_COUNTED_ROWS,
   normalizePage,
   type Page,
@@ -27,6 +22,7 @@ import { AdminLogService } from '../../common/admin-log.service.js';
 import { personnelSearchWhere, searchTerms, wordsWhere } from '../../common/sql-search.js';
 import { Op, type Order, type WhereOptions } from 'sequelize';
 import type { RniUser } from '../../common/auth/current-user.js';
+import { DroitsService, porteeDe } from '../../common/auth/droits.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService, CacheTag, CacheTtl } from '../../common/cache/cache.service.js';
 import { PersonnelRpsi, RefUser, UserDetail } from '../../database/models/index.js';
@@ -68,7 +64,13 @@ export class UsersService {
     @InjectModel(RefUser) private readonly users: typeof RefUser,
     @Inject(REMOP_CLIENT) private readonly remop: RemopClient,
     private readonly cache: CacheService,
+    private readonly droits: DroitsService,
   ) {}
+
+  /** Gestion du personnel nationale (droit `gestion.acces` de portée « toutes les régions »). */
+  private gestionNationale(u: RniUser): boolean {
+    return porteeDe(u, Droit.GESTION_ACCES) === 'national';
+  }
 
   me(u: RniUser): CurrentUserDto {
     return {
@@ -86,8 +88,9 @@ export class UsersService {
       libelle_region: u.libelle_region,
       regions_visibles: u.perimetres.planning,
       perimetres: u.perimetres,
-      is_admin: isAdminProfil(u.id_profil),
-      is_super_admin: u.id_profil === Profil.SUPER_ADMIN,
+      droits: u.droits,
+      profils_visibles: u.profils_visibles,
+      profils_gerables: u.profils_gerables,
       geoloc_id_geoloc: u.geoloc_id_geoloc,
       geoloc_indicatif: u.geoloc_indicatif,
       geoloc_bool_geoloc: u.geoloc_bool_geoloc,
@@ -96,20 +99,20 @@ export class UsersService {
   }
 
   /**
-   * BR-GPU-1 : comptes listés (profils 3, 4, 7 ; + 1 et 6 pour le GIGN), jamais les inactifs.
-   * Les référents ne voient que leur région ; le GIGN peut filtrer par région.
+   * BR-GPU-1 : comptes des profils listés pour le profil de l'utilisateur (Administration ›
+   * Profils), jamais les inactifs. Portée régionale : sa région ; nationale : filtre de région libre.
    * **Pagination côté serveur** : recherche, filtres et tri sont exécutés en SQL (index trigrammes).
    */
   async list(current: RniUser, query: UserListQuery): Promise<Page<UserDto>> {
     const { page, size, offset } = normalizePage(query.page, query.size);
-    const isGign = isNationalAdmin(current.id_profil);
+    const isGign = this.gestionNationale(current);
     if (!isGign && query.region != null && query.region !== current.id_region) {
-      throw new BusinessException(ErrorCode.HORS_PERIMETRE, 'Un référent ne consulte que le personnel de sa région.', 403);
+      throw new BusinessException(ErrorCode.HORS_PERIMETRE, 'Votre profil ne consulte que le personnel de sa région.', 403);
     }
     const region = isGign ? (query.region ?? null) : current.id_region;
     if (!isGign && region == null) return { items: [], total: 0, page, size };
 
-    const allowed = listableProfils(current.id_profil);
+    const allowed = current.profils_visibles;
     if (query.profil != null && !allowed.includes(query.profil)) return { items: [], total: 0, page, size };
     const profils = query.profil != null ? [query.profil] : allowed;
 
@@ -147,11 +150,13 @@ export class UsersService {
     const terms = searchTerms(q);
     if (!terms.length) return [];
     this.logger.verbose(`Recherche de personnel planifiable (${current.nigend}) : ${terms.length} mot(s)`);
-    const scope: WhereOptions =
-      current.id_profil === Profil.NEGOCIATEUR ? { id_user: current.id_user } : !isNationalAdmin(current.id_profil) ? { id_region: current.id_region } : {};
+    // Portée du droit planning.ecrire : soi-même, sa région, ou toutes les régions
+    const portee = porteeDe(current, Droit.PLANNING_ECRIRE);
+    if (!portee) return [];
+    const scope: WhereOptions = portee === 'soi' ? { id_user: current.id_user } : portee === 'region' ? { id_region: current.id_region } : {};
     return (await UserDetail.findAll({
       attributes: USER_ATTRIBUTES,
-      where: { [Op.and]: [{ bool_user_inactif: false, id_profil: { [Op.in]: PLANNING_PROFILS }, ...scope }, ...wordsWhere(terms)] },
+      where: { [Op.and]: [{ bool_user_inactif: false, id_profil: { [Op.in]: await this.droits.planningProfils() }, ...scope }, ...wordsWhere(terms)] },
       order: [['nom', 'ASC'], ['prenom', 'ASC']],
       limit: 20,
       raw: true,
@@ -163,7 +168,7 @@ export class UsersService {
     if ((q ?? '').trim().length < 3) return [];
     const terms = searchTerms(q);
     this.logger.verbose(`Recherche RPSI (${current.nigend}) : ${terms.length} mot(s)`);
-    const scope: WhereOptions = isNationalAdmin(current.id_profil) ? {} : { id_region: current.id_region };
+    const scope: WhereOptions = this.gestionNationale(current) ? {} : { id_region: current.id_region };
     const people = await PersonnelRpsi.findAll({
       attributes: ['nigend', 'nom', 'prenom', 'grade', 'code_unite', 'libelle_unite', 'id_region', 'libelle_region'],
       where: { [Op.and]: [scope, ...wordsWhere(terms)] },
@@ -188,23 +193,28 @@ export class UsersService {
   }
 
   private assertAssignable(current: RniUser, idProfil: number): void {
-    if (!assignableProfils(current.id_profil).includes(idProfil)) {
+    if (!current.profils_gerables.includes(idProfil)) {
       this.logger.warn(`Attribution refusée : profil ${idProfil} par ${current.nigend} (profil ${current.id_profil}).`);
       throw BusinessException.forbidden('Ce profil ne peut pas être attribué.');
     }
   }
 
+  /**
+   * BR-GPU-3 : compte d'un profil géré par le profil de l'utilisateur (Administration › Profils),
+   * dans sa région si son droit `gestion.acces` est régional.
+   */
   private assertManageable(current: RniUser, target: { id_region: number | null; id_profil: number }): void {
-    // Seul un super administrateur gère les comptes super administrateur
+    const portee = porteeDe(current, Droit.GESTION_ACCES);
+    if (!portee) throw BusinessException.forbidden();
+    // Protection codée : un super administrateur n'est géré que par un super administrateur
     if (target.id_profil === Profil.SUPER_ADMIN && current.id_profil !== Profil.SUPER_ADMIN) {
       throw BusinessException.forbidden('Seul un super administrateur gère ce compte.');
     }
-    if (isNationalAdmin(current.id_profil)) return;
     this.logger.verbose(`Contrôle de gestion : ${current.nigend} (région ${current.id_region}) → compte de la région ${target.id_region}, profil ${target.id_profil}`);
-    if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
-    if (GIGN_ONLY_PROFILS.includes(target.id_profil)) throw BusinessException.forbidden('Seul le GIGN gère les comptes GIGN et OMS.');
+    if (!current.profils_gerables.includes(target.id_profil)) throw BusinessException.forbidden('Votre profil ne gère pas les comptes de ce profil.');
+    if (portee === 'national') return;
     if (target.id_region == null || target.id_region !== current.id_region) {
-      throw BusinessException.forbidden('Un référent ne gère que le personnel de sa région.');
+      throw BusinessException.forbidden('Votre profil ne gère que le personnel de sa région.');
     }
   }
 
@@ -301,10 +311,11 @@ export class UsersService {
   async neoLines(current: RniUser, nigend: string) {
     this.logger.debug(`Lignes NEO de ${nigend} demandées par ${current.nigend}`);
     if (nigend !== current.nigend) {
-      if (!isAdminProfil(current.id_profil)) throw BusinessException.forbidden();
+      const portee = porteeDe(current, Droit.GESTION_ACCES);
+      if (!portee) throw BusinessException.forbidden();
       const target = await this.users.findOne({ where: { nigend, bool_user_inactif: false } });
       if (!target) throw new BusinessException(ErrorCode.UTILISATEUR_INCONNU);
-      if (!isNationalAdmin(current.id_profil) && target.id_region !== current.id_region) throw BusinessException.forbidden();
+      if (portee !== 'national' && target.id_region !== current.id_region) throw BusinessException.forbidden();
     }
     return this.remop.lines(nigend);
   }

@@ -1,6 +1,8 @@
 /**
- * Profils applicatifs (`ref_profil`).
- * Cf. cahier des charges §2.2.
+ * Profils applicatifs livrés (`ref_profil`), cf. cahier des charges §2.2.
+ * Les libellés, l'ordre, le port d'un planning et **tous les droits** sont en base et se règlent
+ * dans Administration (Profils, Droits) ; d'autres profils peuvent y être créés. Seul le super
+ * administrateur garde des protections codées (il ne peut pas se retirer l'administration).
  */
 export enum Profil {
   /** Administrateur national. */
@@ -19,94 +21,6 @@ export enum Profil {
   REFERENT_ADJOINT = 7,
   /** Super administrateur : droits du GIGN + paramétrage des périmètres de visualisation. */
   SUPER_ADMIN = 8,
-}
-
-export const PROFIL_LIBELLES: Record<Profil, string> = {
-  [Profil.GIGN]: 'GIGN',
-  [Profil.LECTURE_SEULE]: 'Lecture seule',
-  [Profil.REFERENT]: 'Référent',
-  [Profil.NEGOCIATEUR]: 'Négociateur',
-  [Profil.FICHE_CRISE]: 'Fiche de crise',
-  [Profil.OMS]: 'OMS',
-  [Profil.REFERENT_ADJOINT]: 'Référent adjoint',
-  [Profil.SUPER_ADMIN]: 'Super administrateur',
-};
-
-/** Administrateurs nationaux : GIGN et super administrateur (droits identiques hors paramétrage). */
-export const NATIONAL_ADMIN_PROFILS: readonly Profil[] = [Profil.GIGN, Profil.SUPER_ADMIN];
-
-export function isNationalAdmin(id: number | null | undefined): boolean {
-  return id != null && NATIONAL_ADMIN_PROFILS.includes(id);
-}
-
-/** BR-AUTH-5 : profils « admin » au sens applicatif (accès /gestion, droits étendus). */
-export const ADMIN_PROFILS: readonly Profil[] = [Profil.GIGN, Profil.REFERENT, Profil.REFERENT_ADJOINT, Profil.SUPER_ADMIN];
-
-/** Profils portant un planning et apparaissant sur la carte / le planning. */
-export const PLANNING_PROFILS: readonly Profil[] = [
-  Profil.REFERENT,
-  Profil.NEGOCIATEUR,
-  Profil.REFERENT_ADJOINT,
-];
-
-/**
- * BR-PLA-7 : profils autorisés à écrire dans le planning — les administrateurs nationaux partout,
- * les référents dans leur région, le négociateur pour lui-même (contrôle fin côté API).
- */
-export const PLANNING_WRITE_PROFILS: readonly Profil[] = [
-  Profil.GIGN,
-  Profil.SUPER_ADMIN,
-  Profil.REFERENT,
-  Profil.REFERENT_ADJOINT,
-  Profil.NEGOCIATEUR,
-];
-
-export function canWritePlanning(id: number | null | undefined): boolean {
-  return id != null && PLANNING_WRITE_PROFILS.includes(id);
-}
-
-/** BR-FOR-1 : profils exclus du module fiche de crise. */
-export const FORMULAIRE_EXCLUDED_PROFILS: readonly Profil[] = [
-  Profil.LECTURE_SEULE,
-  Profil.FICHE_CRISE,
-  Profil.OMS,
-];
-
-/** Profils en consultation seule (aucune écriture métier hors appareil/géolocalisation). */
-export const READ_ONLY_PROFILS: readonly Profil[] = [Profil.LECTURE_SEULE, Profil.OMS, Profil.FICHE_CRISE];
-
-/** BR-GPU-3 : profils réservés aux administrateurs nationaux dans la gestion du personnel. */
-export const GIGN_ONLY_PROFILS: readonly Profil[] = [Profil.GIGN, Profil.OMS, Profil.SUPER_ADMIN];
-
-/** BR-GPU-3 : profils attribuables par un référent / référent adjoint. */
-export const REGIONAL_ASSIGNABLE_PROFILS: readonly Profil[] = [
-  Profil.REFERENT,
-  Profil.REFERENT_ADJOINT,
-  Profil.NEGOCIATEUR,
-];
-
-export function isAdminProfil(id: number | null | undefined): boolean {
-  return id != null && ADMIN_PROFILS.includes(id);
-}
-
-export function canAccessFormulaire(id: number | null | undefined): boolean {
-  return id != null && !FORMULAIRE_EXCLUDED_PROFILS.includes(id);
-}
-
-/** Profils qu'un utilisateur donné peut attribuer (BR-GPU-3). */
-export function assignableProfils(current: number): Profil[] {
-  // Le profil super administrateur n'est attribuable que par un super administrateur.
-  if (current === Profil.SUPER_ADMIN) return [...REGIONAL_ASSIGNABLE_PROFILS, Profil.GIGN, Profil.OMS, Profil.SUPER_ADMIN];
-  if (current === Profil.GIGN) return [...REGIONAL_ASSIGNABLE_PROFILS, Profil.GIGN, Profil.OMS];
-  if (isAdminProfil(current)) return [...REGIONAL_ASSIGNABLE_PROFILS];
-  return [];
-}
-
-/** BR-GPU-1 : profils listés dans la gestion du personnel. */
-export function listableProfils(current: number): Profil[] {
-  return isNationalAdmin(current)
-    ? [Profil.SUPER_ADMIN, Profil.GIGN, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.OMS, Profil.REFERENT_ADJOINT]
-    : [...PLANNING_PROFILS];
 }
 
 /**
@@ -136,7 +50,8 @@ export const PERIMETRE_MODULE_LIBELLES: Record<PerimetreModule, string> = { cart
  * Le super administrateur est toujours national (non modifiable).
  */
 export function defaultPerimetre(profil: number, module: PerimetreModule): Perimetre {
-  if (isNationalAdmin(profil)) return 'national';
+  if (profil === Profil.GIGN || profil === Profil.SUPER_ADMIN) return 'national';
+  if (!Object.values(Profil).includes(profil)) return 'region';
   if (module === 'planning') return 'region';
   if (profil === Profil.LECTURE_SEULE) return 'national';
   if (profil === Profil.OMS) return 'region';

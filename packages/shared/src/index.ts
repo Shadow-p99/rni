@@ -1,3 +1,4 @@
+export * from './droits.js';
 export * from './profils.js';
 export * from './positions.js';
 export * from './creneaux.js';

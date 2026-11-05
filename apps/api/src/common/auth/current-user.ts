@@ -1,4 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { DroitsMap } from '@rni/shared';
 
 /** Utilisateur RNI résolu à partir des en-têtes SSO (BR-AUTH-1/2). */
 export interface RniUser {
@@ -16,6 +17,11 @@ export interface RniUser {
   libelle_unite: string | null;
   /** Régions visibles par module (BR-AUTH-6) ; `null` = national. */
   perimetres: { carte: number[] | null; planning: number[] | null };
+  /** Droits du profil (Administration › Droits). */
+  droits: DroitsMap;
+  /** Gestion du personnel : profils listés / gérés. */
+  profils_visibles: number[];
+  profils_gerables: number[];
   geoloc_id_geoloc: string | null;
   geoloc_indicatif: string | null;
   geoloc_bool_geoloc: boolean;

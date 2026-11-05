@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { DEFAULT_MESSAGES, ErrorCode, MessageType } from '@rni/shared';
 import { AdminMessage } from '../database/models/index.js';
+import { CacheService, CacheTag } from './cache/cache.service.js';
 
 /** Catalogue des messages métier (`t_admin_messages`), mis en cache avec repli intégré. */
 @Injectable()
@@ -10,9 +11,16 @@ export class MessagesService implements OnModuleInit {
   private cache = new Map<string, { libelle: string; type: MessageType }>();
   private loadedAt = 0;
 
-  constructor(@InjectModel(AdminMessage) private readonly messages: typeof AdminMessage) {}
+  constructor(
+    @InjectModel(AdminMessage) private readonly messages: typeof AdminMessage,
+    private readonly cacheService: CacheService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
+    // Libellés modifiés dans l'administration (ce processus ou un autre) : relecture
+    this.cacheService.onInvalidate((tags) => {
+      if (tags.includes(CacheTag.PARAM)) void this.refresh();
+    });
     await this.refresh();
   }
 

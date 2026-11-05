@@ -1,6 +1,5 @@
 import { Controller, Get, Inject, Param, Query } from '@nestjs/common';
 import {
-  ADMIN_PROFILS,
   AliveCheckDto,
   AppInfoDto,
   BaseLayerDto,
@@ -8,12 +7,11 @@ import {
   GeocodeCandidate,
   IsochroneCollection,
   MockUserDto,
-  PROFIL_LIBELLES,
-  Profil,
+  Droit,
 } from '@rni/shared';
 import { readFileSync } from 'node:fs';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
-import { NoAudit, Profiles, Public } from '../../common/auth/decorators.js';
+import { NoAudit, Public, RequireDroit } from '../../common/auth/decorators.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService } from '../../common/cache/cache.service.js';
 import { APP_CONFIG, type AppConfig } from '../../config/configuration.js';
@@ -148,7 +146,7 @@ export class ServiceController {
 
   /** Géolocalisation brute des terminaux NEO du périmètre (référents / GIGN). */
   @Get('geoloc')
-  @Profiles(...ADMIN_PROFILS)
+  @RequireDroit(Droit.CARTE_GEOLOC)
   async geolocPositions(@CurrentUser() user: RniUser) {
     const positions = await this.geoloc.positions();
     const regions = user.perimetres.carte;
@@ -173,7 +171,7 @@ export class ServiceController {
 
   /** BR-CAR-6 : isochrones (timebreaks paramétrés, 30/60/90 min par défaut). */
   @Get('isochrone')
-  @Profiles(...ADMIN_PROFILS)
+  @RequireDroit(Droit.CARTE_ISOCHRONE)
   async isochrone(@Query('x') x: string, @Query('y') y: string): Promise<IsochroneCollection> {
     const lng = Number(x);
     const lat = Number(y);
@@ -218,7 +216,7 @@ export class ServiceController {
         nom: r.nom,
         prenom: r.prenom,
         id_profil: r.id_profil,
-        libelle_profil: r.libelle_profil ?? PROFIL_LIBELLES[r.id_profil as Profil],
+        libelle_profil: r.libelle_profil ?? `Profil ${r.id_profil}`,
         libelle_region: r.libelle_region,
       }));
   }

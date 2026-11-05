@@ -1,22 +1,26 @@
+import type { Portee } from '@rni/shared';
 import { PlanningService } from './planning.service.js';
 import type { RniUser } from '../../common/auth/current-user.js';
 
 const svc = Object.create(PlanningService.prototype) as PlanningService;
-const me = (id_profil: number, id_user = 1, id_region = 11) => ({ id_profil, id_user, id_region }) as RniUser;
+/** Utilisateur dont le profil a le droit planning.ecrire avec la portée donnée (`null` = refusé). */
+const me = (portee: Portee | null, id_user = 1, id_region = 11) =>
+  ({ id_profil: 99, id_user, id_region, droits: portee ? { 'planning.ecrire': portee } : {} }) as unknown as RniUser;
 
-describe('PlanningService.assertCanWrite (BR-PLA-7)', () => {
-  it('GIGN : tout le monde', () => {
-    expect(() => svc.assertCanWrite(me(1), { id_user: 9, id_region: 84 })).not.toThrow();
+describe('PlanningService.assertCanWrite (BR-PLA-7, portée du droit planning.ecrire)', () => {
+  it('toutes les régions : tout le monde', () => {
+    expect(() => svc.assertCanWrite(me('national'), { id_user: 9, id_region: 84 })).not.toThrow();
   });
-  it('référent / référent adjoint : sa région uniquement', () => {
-    expect(() => svc.assertCanWrite(me(3), { id_user: 9, id_region: 11 })).not.toThrow();
-    expect(() => svc.assertCanWrite(me(7), { id_user: 9, id_region: 84 })).toThrow();
+  it('sa région uniquement', () => {
+    expect(() => svc.assertCanWrite(me('region'), { id_user: 9, id_region: 11 })).not.toThrow();
+    expect(() => svc.assertCanWrite(me('region'), { id_user: 9, id_region: 84 })).toThrow();
+    expect(() => svc.assertCanWrite(me('region', 1, null as unknown as number), { id_user: 9, id_region: 11 })).toThrow();
   });
-  it('négociateur : lui-même uniquement', () => {
-    expect(() => svc.assertCanWrite(me(4, 5), { id_user: 5, id_region: 11 })).not.toThrow();
-    expect(() => svc.assertCanWrite(me(4, 5), { id_user: 6, id_region: 11 })).toThrow();
+  it('lui-même uniquement', () => {
+    expect(() => svc.assertCanWrite(me('soi', 5), { id_user: 5, id_region: 11 })).not.toThrow();
+    expect(() => svc.assertCanWrite(me('soi', 5), { id_user: 6, id_region: 11 })).toThrow();
   });
-  it('profils de consultation : refus', () => {
-    for (const p of [2, 5, 6]) expect(() => svc.assertCanWrite(me(p), { id_user: 1, id_region: 11 })).toThrow();
+  it('sans le droit : refus', () => {
+    expect(() => svc.assertCanWrite(me(null), { id_user: 1, id_region: 11 })).toThrow();
   });
 });

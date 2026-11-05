@@ -13,6 +13,9 @@ export class RefProfil extends Model {
 
   @Column(DataType.STRING(64))
   libelle: string;
+
+  @Column(DataType.BOOLEAN)
+  has_planning: boolean;
 }
 
 @Table({ tableName: 't_profil_classement', timestamps: false })
@@ -39,6 +42,12 @@ export class RefPosService extends Model {
 
   @Column(DataType.BOOLEAN)
   is_actif: boolean;
+
+  @Column(DataType.BOOLEAN)
+  is_restreinte: boolean;
+
+  @Column(DataType.SMALLINT)
+  priorite_cluster: number | null;
 }
 
 @Table({ tableName: 'ref_creneaux', timestamps: false })

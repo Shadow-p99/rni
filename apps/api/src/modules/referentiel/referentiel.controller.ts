@@ -18,7 +18,7 @@ export class ReferentielController {
     const active = actif === 'true';
     return this.ref(`positions:${active}`, () =>
       RefPosService.findAll({
-        attributes: ['id_pos_service', 'libelle', 'color', 'is_actif'],
+        attributes: ['id_pos_service', 'libelle', 'color', 'is_actif', 'is_restreinte', 'priorite_cluster'],
         where: active ? { is_actif: true } : {},
         order: [['id_pos_service', 'ASC']],
         raw: true,
@@ -35,7 +35,7 @@ export class ReferentielController {
   profils(): Promise<ProfilDto[]> {
     return this.ref('profils', async () => {
       const [profils, classements] = await Promise.all([
-        RefProfil.findAll({ attributes: ['id_profil', 'code', 'libelle'], raw: true }),
+        RefProfil.findAll({ attributes: ['id_profil', 'code', 'libelle', 'has_planning'], raw: true }),
         ProfilClassement.findAll({ raw: true }),
       ]);
       const rank = new Map(classements.map((c) => [c.id_profil, c.classement]));

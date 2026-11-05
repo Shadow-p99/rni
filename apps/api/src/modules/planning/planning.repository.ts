@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PLANNING_PROFILS, PlanningDto } from '@rni/shared';
+import { PlanningDto } from '@rni/shared';
+import { DroitsService } from '../../common/auth/droits.service.js';
 import { Op, type Transaction, type WhereOptions } from 'sequelize';
 import { personnelSearchWhere } from '../../common/sql-search.js';
 import { Planning, RefUser, UserDetail } from '../../database/models/index.js';
@@ -81,13 +82,15 @@ function toRow(p: PlanningWithUser): PlanningRow & { id_region: number | null } 
 /** Lectures planning partagées par les modules planning / région / carte (modèles Sequelize). */
 @Injectable()
 export class PlanningRepository {
-  /** Personnels portant un planning (profils 3, 4, 7 actifs), dans un périmètre de régions. */
+  constructor(private readonly droits: DroitsService) {}
+
+  /** Personnels portant un planning (profils `has_planning`, comptes actifs), dans un périmètre de régions. */
   async planningUsers(regions: number[] | null, extra: { id_user?: number; nigend?: string; terms?: string[] } = {}): Promise<UserPlanningRow[]> {
     if (regions && !regions.length) return [];
     const { terms = [], ...ids } = extra;
     const where: WhereOptions = {
       bool_user_inactif: false,
-      id_profil: { [Op.in]: PLANNING_PROFILS },
+      id_profil: { [Op.in]: await this.droits.planningProfils() },
       ...(regions ? { id_region: { [Op.in]: regions } } : {}),
       ...(ids.id_user != null ? { id_user: ids.id_user } : {}),
       ...(ids.nigend != null ? { nigend: ids.nigend } : {}),
@@ -137,7 +140,7 @@ export class PlanningRepository {
           required: true,
           where: {
             bool_user_inactif: false,
-            id_profil: { [Op.in]: PLANNING_PROFILS },
+            id_profil: { [Op.in]: await this.droits.planningProfils() },
             ...(regions ? { id_region: { [Op.in]: regions } } : {}),
             ...(filter.nigend != null ? { nigend: filter.nigend } : {}),
           },

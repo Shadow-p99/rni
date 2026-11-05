@@ -9,7 +9,6 @@ import {
   slotsToPlage,
 } from './creneaux.js';
 import { ErrorCode } from './errors.js';
-import { isRestrictedFor } from './positions.js';
 
 export interface RuleViolation {
   code: ErrorCode;
@@ -82,16 +81,22 @@ export function validatePlageBounds(
   return null;
 }
 
-/** BR-PLA-4 : un négociateur ne peut ni poser ni sortir une position Alerte / Formateur. */
+/**
+ * BR-PLA-4 : sans le droit `planning.positions_restreintes`, on ne peut ni poser ni sortir une
+ * position restreinte (`ref_pos_service.is_restreinte`, par défaut Alerte et Formateur).
+ */
 export function checkPositionAllowed(
-  profil: number,
+  allowRestricted: boolean,
+  restricted: readonly number[],
   newPosition: number | null | undefined,
   previousPosition?: number | null,
 ): RuleViolation | null {
-  if (isRestrictedFor(profil, newPosition) || isRestrictedFor(profil, previousPosition)) {
+  if (allowRestricted) return null;
+  const isRestricted = (p: number | null | undefined) => p != null && restricted.includes(p);
+  if (isRestricted(newPosition) || isRestricted(previousPosition)) {
     return {
       code: ErrorCode.ACTION_NON_AUTORISEE,
-      message: 'Les positions Alerte et Formateur sont réservées aux référents et au GIGN.',
+      message: 'Cette position de service est réservée aux profils disposant du droit « positions restreintes ».',
     };
   }
   return null;

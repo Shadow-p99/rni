@@ -68,7 +68,7 @@ describe('API RNI (e2e)', () => {
       expect(r.body).toBe(false);
       expect((await as('999999').get('/users/me')).status).toBe(401);
     });
-    it('isAdmin = profils 1, 3, 7', async () => {
+    it('isAdmin = droit gestion.acces (profils 1, 3, 7, 8 par défaut)', async () => {
       expect((await as(GIGN).get('/users/isAdmin')).body).toBe(true);
       expect((await as(REFERENT_IDF).get('/users/isAdmin')).body).toBe(true);
       expect((await as(NEGO_IDF).get('/users/isAdmin')).body).toBe(false);
@@ -851,6 +851,154 @@ describe('API RNI (e2e)', () => {
       expect((await as(GIGN).post('/users', { nigend: '200016', id_profil: 8 })).status).toBe(403);
       const sa = (await as(GIGN).get(`/users?q=${SUPER_ADMIN}`)).body.items[0] as { id_user: number };
       expect((await as(GIGN).put(`/users/${sa.id_user}`, { commentaire: 'x' })).status).toBe(403);
+    });
+  });
+
+  describe('paramétrage : droits par profil (Administration › Droits)', () => {
+    const setDroit = (id_profil: number, code: string, portee: string | null) => as(SUPER_ADMIN).put('/admin/droits', { items: [{ id_profil, code, portee }] });
+
+    it('matrice réservée au droit admin.acces, reprenant les règles historiques', async () => {
+      expect((await as(GIGN).get('/admin/droits')).status).toBe(403);
+      const m = (await as(SUPER_ADMIN).get('/admin/droits')).body as { catalogue: { code: string }[]; profils: { id_profil: number; droits: Record<string, string>; locked: string[] }[] };
+      expect(m.catalogue.map((c) => c.code)).toContain('formulaire.cloturer');
+      const p = (id: number) => m.profils.find((x) => x.id_profil === id)!.droits;
+      expect(p(4)).toMatchObject({ 'planning.ecrire': 'soi', 'formulaire.voir': 'region', 'formulaire.cloturer': 'auteur' });
+      expect(p(4)['gestion.acces']).toBeUndefined();
+      expect(p(2)['formulaire.voir']).toBeUndefined();
+      expect(m.profils.find((x) => x.id_profil === 8)!.locked).toContain('admin.acces');
+      const me = (await as(NEGO_IDF).get('/users/me')).body;
+      expect(me.droits['planning.ecrire']).toBe('soi');
+      expect(me.profils_gerables).toEqual([]);
+    });
+
+    it('un clic : fiches de crise retirées puis rendues au négociateur, effet immédiat', async () => {
+      expect((await as(NEGO_IDF).get('/formulaire')).status).toBe(200);
+      expect((await setDroit(4, 'formulaire.voir', null)).status).toBe(200);
+      expect((await as(NEGO_IDF).get('/formulaire')).status).toBe(403);
+      expect((await as(NEGO_IDF).get('/users/me')).body.droits['formulaire.voir']).toBeUndefined();
+      await setDroit(4, 'formulaire.voir', 'region');
+      expect((await as(NEGO_IDF).get('/formulaire')).status).toBe(200);
+      // Création seule retirée : la consultation reste
+      await setDroit(4, 'formulaire.creer', null);
+      expect((await as(NEGO_IDF).post('/formulaire', { nom: 'X' })).status).toBe(403);
+      await setDroit(4, 'formulaire.creer', 'oui');
+      // Droit accordé à un profil de consultation
+      await setDroit(2, 'formulaire.voir', 'national');
+      expect((await as(LECTURE).get('/formulaire')).status).toBe(200);
+      await setDroit(2, 'formulaire.voir', null);
+      expect((await as(LECTURE).get('/formulaire')).status).toBe(403);
+    });
+
+    it('clôture par un référent quand la portée passe à « toutes les fiches visibles »', async () => {
+      const f = (await as(NEGO_IDF).post('/formulaire', { nom: 'CLOTURE', crise: 'Forcené' })).body;
+      expect(f.can_cloturer).toBe(true);
+      const vue = (await as(REFERENT_IDF).get(`/formulaire/${f.id_formulaire}`)).body;
+      expect(vue).toMatchObject({ can_modifier: true, can_cloturer: false, can_supprimer: false });
+      await setDroit(3, 'formulaire.cloturer', 'perimetre');
+      expect((await as(REFERENT_IDF).get(`/formulaire/${f.id_formulaire}`)).body.can_cloturer).toBe(true);
+      const closed = await as(REFERENT_IDF).put(`/formulaire/${f.id_formulaire}/close`);
+      expect(closed.body).toMatchObject({ is_closed: true, can_cloturer: false, can_modifier: false });
+      await setDroit(3, 'formulaire.cloturer', 'auteur');
+      expect((await as(NEGO_IDF).del(`/formulaire/${f.id_formulaire}`)).status).toBe(204);
+    });
+
+    it('modification limitée à ses propres fiches', async () => {
+      const f = (await as(NEGO_IDF).post('/formulaire', { nom: 'AUTEUR' })).body;
+      await setDroit(3, 'formulaire.modifier', 'auteur');
+      expect((await as(REFERENT_IDF).put(`/formulaire/${f.id_formulaire}`, { situation_description: 'x' })).status).toBe(403);
+      await setDroit(3, 'formulaire.modifier', 'perimetre');
+      expect((await as(REFERENT_IDF).put(`/formulaire/${f.id_formulaire}`, { situation_description: 'x' })).status).toBe(200);
+      await as(NEGO_IDF).del(`/formulaire/${f.id_formulaire}`);
+    });
+
+    it('planning : portée d’écriture et positions restreintes', async () => {
+      const base = { nigend: NEGO_IDF_2, date_debut: future(600), id_creneaux_debut: 1, date_fin: future(600), id_creneaux_fin: 2, id_pos_service: 1 };
+      expect((await as(NEGO_IDF).post('/planning', base)).status).toBe(403);
+      await setDroit(4, 'planning.ecrire', 'region');
+      const created = await as(NEGO_IDF).post('/planning', base);
+      expect(created.status).toBe(201);
+      // Position restreinte (Alerte) refusée sans le droit, acceptée avec
+      const alerte = { ...base, date_debut: future(602), date_fin: future(602), id_pos_service: 4 };
+      expect((await as(NEGO_IDF).post('/planning', alerte)).body.code).toBe('RNI-1008');
+      await setDroit(4, 'planning.positions_restreintes', 'oui');
+      expect((await as(NEGO_IDF).post('/planning', alerte)).status).toBe(201);
+      await setDroit(4, 'planning.positions_restreintes', null);
+      await setDroit(4, 'planning.ecrire', 'soi');
+      await as(REFERENT_IDF).post('/planning/clear', { nigend: NEGO_IDF_2, date_debut: future(600), id_creneaux_debut: 1, date_fin: future(602), id_creneaux_fin: 2 });
+    });
+
+    it('valeurs contrôlées ; le super administrateur garde l’administration', async () => {
+      expect((await setDroit(4, 'formulaire.voir', 'soi')).body.code).toBe('RNI-1002');
+      expect((await setDroit(4, 'inconnu', 'oui')).body.code).toBe('RNI-1002');
+      expect((await setDroit(8, 'admin.acces', null)).status).toBe(403);
+      expect((await as(SUPER_ADMIN).get('/admin/droits')).status).toBe(200);
+    });
+  });
+
+  describe('paramétrage : profils, positions, fiche de crise, paramètres', () => {
+    it('création d’un profil à partir d’un modèle, attribution, suppression', async () => {
+      const list = (await as(SUPER_ADMIN).post('/admin/profils', { libelle: 'Négociateur stagiaire', code: 'NS', classement: 50, has_planning: true, modele: 4 })).body as { id_profil: number; libelle: string; visibles: number[] }[];
+      const p = list.find((x) => x.libelle === 'Négociateur stagiaire')!;
+      expect(p.id_profil).toBeGreaterThanOrEqual(100);
+      const droits = (await as(SUPER_ADMIN).get('/admin/droits')).body.profils.find((x: { id_profil: number }) => x.id_profil === p.id_profil).droits;
+      expect(droits).toMatchObject({ 'planning.ecrire': 'soi', 'formulaire.voir': 'region' });
+      // Les référents, qui géraient le modèle, gèrent aussi le nouveau profil
+      expect(list.find((x) => x.id_profil === 3)!.visibles).toContain(p.id_profil);
+      expect((await as(REFERENT_IDF).get('/users/me')).body.profils_gerables).toContain(p.id_profil);
+      expect((await as(SUPER_ADMIN).del('/admin/profils/4')).status).toBe(403);
+      expect((await as(SUPER_ADMIN).del(`/admin/profils/${p.id_profil}`)).status).toBe(200);
+      expect((await as(REFERENT_IDF).get('/users/me')).body.profils_gerables).not.toContain(p.id_profil);
+    });
+
+    it('gestion du personnel : profils gérés', async () => {
+      const put = (gerable: boolean) => as(SUPER_ADMIN).put('/admin/profils/gestion', { items: [{ id_profil: 3, id_profil_cible: 7, visible: true, gerable }] });
+      await put(false);
+      expect((await as(REFERENT_IDF).get('/users/me')).body.profils_gerables).not.toContain(7);
+      await put(true);
+      expect((await as(SUPER_ADMIN).put('/admin/profils/gestion', { items: [{ id_profil: 1, id_profil_cible: 8, visible: true, gerable: true }] })).status).toBe(403);
+    });
+
+    it('positions de service : restreinte et couleur paramétrables', async () => {
+      const list = (await as(SUPER_ADMIN).get('/admin/positions')).body as { id_pos_service: number; is_restreinte: boolean; priorite_cluster: number | null }[];
+      expect(list.find((x) => x.id_pos_service === 4)).toMatchObject({ is_restreinte: true, priorite_cluster: 1 });
+      expect((await as(SUPER_ADMIN).put('/admin/positions/3', { libelle: 'En service', color: 'bleu', is_actif: true, is_restreinte: false, priorite_cluster: null })).body.code).toBe('RNI-1002');
+      const pub = (await as(NEGO_IDF).get('/referentiel/positions')).body as { id_pos_service: number; is_restreinte: boolean }[];
+      expect(pub.find((x) => x.id_pos_service === 5)!.is_restreinte).toBe(true);
+    });
+
+    it('fiche de crise : nouveau type de crise et libellé de champ', async () => {
+      const cfg = (await as(SUPER_ADMIN).get('/admin/formulaire')).body as { crises: { id_type_crise: number; libelle: string; is_actif: boolean }[]; champs: { key: string; label: string; required: boolean; ordre: number }[] };
+      const age = cfg.champs.find((c) => c.key === 'age')!;
+      const body = (crises: object[], label: string) => ({ crises, sections: [], champs: [{ ...age, label }] });
+      const r = await as(SUPER_ADMIN).put('/admin/formulaire', body([...cfg.crises, { libelle: 'Cyberattaque', is_actif: true }], 'Âge estimé'));
+      expect(r.status).toBe(200);
+      const pub = (await as(NEGO_IDF).get('/formulaire/config')).body;
+      expect(pub.crises.map((c: { libelle: string }) => c.libelle)).toContain('Cyberattaque');
+      expect(pub.champs.find((c: { key: string }) => c.key === 'age').label).toBe('Âge estimé');
+      const f = await as(NEGO_IDF).post('/formulaire', { nom: 'CYBER', crise: 'Cyberattaque' });
+      expect(f.status).toBe(201);
+      await as(NEGO_IDF).del(`/formulaire/${f.body.id_formulaire}`);
+      expect((await as(SUPER_ADMIN).put('/admin/formulaire', body(cfg.crises.filter((c) => c.libelle !== 'Aucun'), 'Âge'))).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).put('/admin/formulaire', body(cfg.crises, age.label))).status).toBe(200);
+      expect((await as(NEGO_IDF).post('/formulaire', { nom: 'X', crise: 'Cyberattaque' })).body.code).toBe('RNI-1002');
+    });
+
+    it('paramètres applicatifs : secrets masqués, valeurs contrôlées', async () => {
+      const list = (await as(SUPER_ADMIN).get('/admin/parametres')).body as { cle: string; valeur: string | null; secret: boolean; gere_par: string | null }[];
+      expect(list.filter((p) => p.secret).every((p) => p.valeur === null)).toBe(true);
+      expect(list.find((p) => p.cle === 'rni.log.level')?.gere_par).toBe('Journalisation');
+      expect((await as(SUPER_ADMIN).put('/admin/parametres', { cle: 'rni.carte.couleur_sans_planning', valeur: 'gris' })).body.code).toBe('RNI-1002');
+      expect((await as(SUPER_ADMIN).put('/admin/parametres', { cle: 'rni.carte.couleur_sans_planning', valeur: '#777777' })).status).toBe(200);
+      expect((await as(null).get('/service/configuration')).body['rni.carte.couleur_sans_planning']).toBe('#777777');
+      await as(SUPER_ADMIN).put('/admin/parametres', { cle: 'rni.carte.couleur_sans_planning', valeur: '#808080' });
+      expect((await as(SUPER_ADMIN).put('/admin/parametres', { cle: 'rni.log.level', valeur: 'debug' })).body.code).toBe('RNI-1002');
+    });
+
+    it('messages : libellé modifié et servi immédiatement', async () => {
+      const put = (libelle: string) => as(SUPER_ADMIN).put('/admin/messages', { code_message: 'RNI-1008', libelle, type: 'ERREUR' });
+      expect((await put('Action interdite pour votre profil.')).status).toBe(200);
+      expect((await as(LECTURE).post('/formulaire', { nom: 'X' })).body.message).toBe('Action interdite pour votre profil.');
+      await put("Vous n'êtes pas autorisé à effectuer cette action.");
     });
   });
 

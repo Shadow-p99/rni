@@ -1,5 +1,5 @@
 import {
-  CRISES,
+  CRISE_PAR_DEFAUT,
   FORMULAIRE_FIELDS,
   FormulaireContent,
   NOTE_MAX,
@@ -15,7 +15,8 @@ const MAX_TEXT = 20_000;
  * Validation serveur d'une fiche de crise : seuls les champs du catalogue sont retenus
  * (liste blanche), types et bornes contrôlés, notes à 0 par défaut (BR-FOR-3).
  */
-export function sanitizeFormulaire(body: unknown, mode: 'create' | 'update'): FormulaireContent {
+/** `crises` : libellés acceptés pour le type de crise (`ref_type_crise` actifs). */
+export function sanitizeFormulaire(body: unknown, mode: 'create' | 'update', crises: readonly string[]): FormulaireContent {
   if (!body || typeof body !== 'object') throw BusinessException.invalid('Corps de requête invalide.');
   const src = body as Record<string, unknown>;
   const out: FormulaireContent = {};
@@ -37,9 +38,9 @@ export function sanitizeFormulaire(body: unknown, mode: 'create' | 'update'): Fo
     if (raw != null && typeof raw !== 'string' && typeof raw !== 'number') throw BusinessException.invalid(`${def.label} : valeur invalide.`);
     const s = raw == null ? null : String(raw).trim() || null;
     if (s && s.length > (def.kind === 'textarea' ? MAX_TEXT : 512)) throw BusinessException.invalid(`${def.label} : texte trop long.`);
-    if (def.kind === 'select' && s && !(CRISES as readonly string[]).includes(s)) throw BusinessException.invalid('Type de crise inconnu.');
+    if (def.kind === 'select' && s && !crises.includes(s) && s !== CRISE_PAR_DEFAUT) throw BusinessException.invalid('Type de crise inconnu.');
     if (def.kind === 'phone' && s && !isValidPhone(s)) throw BusinessException.invalid('Téléphone de l’auteur invalide.');
-    out[def.key] = def.kind === 'select' ? (s ?? 'Aucun') : s;
+    out[def.key] = def.kind === 'select' ? (s ?? CRISE_PAR_DEFAUT) : s;
   }
 
   for (const key of ['terrain_x', 'terrain_y'] as const) {

@@ -2,12 +2,12 @@ import { Body, Controller, Delete, Get, HttpCode, Put, Query } from '@nestjs/com
 import { LOG_CONTEXT_PATTERN, LOG_DB_THRESHOLDS, LOG_DURATIONS, LOG_THRESHOLDS, MAX_LOG_CONTEXTS, type AppLogLevel, type LogContextLevel, type LogSettingsUpdateDto, type LogThreshold } from '@rni/shared';
 import { NoAudit } from '../../common/auth/decorators.js';
 import { DashboardService } from './dashboard.service.js';
-import { PERIMETRES, PERIMETRE_MODULES, Profil, type Perimetre, type PerimetreModule, type PerimetreUpdateDto } from '@rni/shared';
+import { Droit, PERIMETRES, PERIMETRE_MODULES, type Perimetre, type PerimetreModule, type PerimetreUpdateDto } from '@rni/shared';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, Matches, Max, Min, ValidateNested } from 'class-validator';
 import { AdminLogService } from '../../common/admin-log.service.js';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
-import { Profiles } from '../../common/auth/decorators.js';
+import { RequireDroit } from '../../common/auth/decorators.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheNotifyService } from '../../common/cache/cache-notify.service.js';
@@ -79,7 +79,7 @@ class LogSettingsBody implements LogSettingsUpdateDto {
 
 /** Administration (super administrateur) : périmètres de visualisation par profil et par module. */
 @Controller('admin')
-@Profiles(Profil.SUPER_ADMIN)
+@RequireDroit(Droit.ADMIN_ACCES)
 export class AdminController {
   constructor(
     private readonly perimetre: PerimetreService,

@@ -1,6 +1,21 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { Transaction } from 'sequelize';
-import { ParamApp, Planning, RefUser } from '../../database/models/index.js';
+import {
+  AdminMessage,
+  FormulaireChamp,
+  FormulaireSection,
+  ParamApp,
+  PerimetreProfil,
+  Planning,
+  ProfilClassement,
+  ProfilDroit,
+  ProfilGestion,
+  RefDroit,
+  RefPosService,
+  RefProfil,
+  RefTypeCrise,
+  RefUser,
+} from '../../database/models/index.js';
 import { CacheService, CacheTag } from './cache.service.js';
 
 const HOOKS = ['afterCreate', 'afterUpdate', 'afterDestroy', 'afterBulkCreate', 'afterBulkUpdate', 'afterBulkDestroy', 'afterUpsert'] as const;
@@ -21,9 +36,14 @@ export class CacheInvalidationService implements OnModuleInit {
     this.watch(Planning, [CacheTag.PLANNING]);
     this.watch(RefUser, [CacheTag.USERS, CacheTag.PLANNING]);
     this.watch(ParamApp, [CacheTag.PARAM]);
+    // Paramétrage (Administration) : effet immédiat sur ce processus, les autres via PostgreSQL
+    for (const m of [ProfilDroit, ProfilGestion, RefDroit, PerimetreProfil, AdminMessage]) this.watch(m, [CacheTag.PARAM]);
+    for (const m of [RefProfil, ProfilClassement]) this.watch(m, [CacheTag.REFERENTIEL, CacheTag.USERS, CacheTag.PARAM]);
+    this.watch(RefPosService, [CacheTag.REFERENTIEL, CacheTag.PLANNING]);
+    for (const m of [RefTypeCrise, FormulaireSection, FormulaireChamp]) this.watch(m, [CacheTag.REFERENTIEL]);
   }
 
-  private watch(model: typeof Planning | typeof RefUser | typeof ParamApp, tags: CacheTag[]): void {
+  private watch(model: { getTableName(): unknown }, tags: CacheTag[]): void {
     for (const hook of HOOKS) {
       (model as unknown as { addHook(h: string, n: string, fn: (...a: unknown[]) => void): void }).addHook(hook, `rni-cache-${hook}`, (...args: unknown[]) => {
         this.cache.invalidate(...tags);

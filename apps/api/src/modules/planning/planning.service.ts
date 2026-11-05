@@ -3,8 +3,7 @@ import { InjectModel } from '@nestjs/sequelize';
 import {
   ErrorCode,
   InsertPlanningDto,
-  NO_PLANNING_COLOR,
-  POS_SERVICE_LIBELLES,
+  Droit,
   PersonnelCollection,
   PlageBounds,
   PersonnelPointProperties,
@@ -12,7 +11,6 @@ import {
   PlanningDto,
   PlanningInputDto,
   PosService,
-  Profil,
   TimetableDto,
   TimetableFilter,
   MAX_PLANNING_MATCHES,
@@ -35,6 +33,7 @@ import { AdminLogService } from '../../common/admin-log.service.js';
 import { CacheService, CacheTag, CacheTtl, JsonPayload, regionsKey } from '../../common/cache/cache.service.js';
 import { searchTerms } from '../../common/sql-search.js';
 import type { RniUser } from '../../common/auth/current-user.js';
+import { porteeDe, peut } from '../../common/auth/droits.service.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { Db } from '../../database/db.service.js';
@@ -54,6 +53,8 @@ interface PosRow {
   libelle: string;
   color: string;
   is_actif: boolean;
+  is_restreinte: boolean;
+  priorite_cluster: number | null;
 }
 
 @Injectable()
@@ -280,11 +281,12 @@ export class PlanningService {
 
   private async loadGeojson(user: RniUser, now: Date): Promise<PersonnelCollection> {
     const t0 = Date.now();
-    const [current, positions, geoloc] = await Promise.all([
+    const [current, positions, geoloc, sansPlanning] = await Promise.all([
       // La carte a son propre périmètre (BR-AUTH-6 paramétrable)
       this.currentPositions(user.perimetres.carte, now),
       this.positions(),
       this.safeGeoloc(),
+      this.params.couleurSansPlanning(),
     ]);
     const geolocByIndicatif = new Map(geoloc.map((g) => [g.indicatif, g]));
     const features: PersonnelCollection['features'] = [];
@@ -305,9 +307,9 @@ export class PlanningService {
         id_region: u.id_region,
         id_planning: planning?.id_planning ?? null,
         id_pos_service: idPos,
-        libelle_pos_service: pos?.libelle ?? POS_SERVICE_LIBELLES[idPos as PosService] ?? 'Indisponible',
-        // BR-CAR-3 : gris si aucun planning
-        color: planning ? (pos?.color ?? NO_PLANNING_COLOR) : NO_PLANNING_COLOR,
+        libelle_pos_service: pos?.libelle ?? positions.get(idPos)?.libelle ?? 'Indisponible',
+        // BR-CAR-3 : couleur « sans planning » (paramétrable) si aucun planning
+        color: planning ? (pos?.color ?? sansPlanning) : sansPlanning,
         adresse: point.adresse,
         adresse_type: point.type,
         horodatage: point.horodatage,
@@ -353,21 +355,26 @@ export class PlanningService {
     return target;
   }
 
+  /** BR-PLA-7 : portée du droit `planning.ecrire` (toutes les régions, sa région, soi-même). */
   assertCanWrite(current: RniUser, target: { id_user: number; id_region: number | null }): void {
-    switch (current.id_profil) {
-      case Profil.GIGN:
-      case Profil.SUPER_ADMIN:
+    switch (porteeDe(current, Droit.PLANNING_ECRIRE)) {
+      case 'national':
         return;
-      case Profil.REFERENT:
-      case Profil.REFERENT_ADJOINT:
+      case 'region':
         if (current.id_region != null && target.id_region === current.id_region) return;
-        throw BusinessException.forbidden('Un référent ne gère que les plannings de sa région.');
-      case Profil.NEGOCIATEUR:
+        throw BusinessException.forbidden('Votre profil ne gère que les plannings de sa région.');
+      case 'soi':
         if (target.id_user === current.id_user) return;
-        throw BusinessException.forbidden('Un négociateur ne gère que son propre planning.');
+        throw BusinessException.forbidden('Votre profil ne gère que son propre planning.');
       default:
-        throw BusinessException.forbidden();
+        throw BusinessException.forbidden('Votre profil ne peut pas modifier le planning.');
     }
+  }
+
+  /** BR-PLA-4 : positions restreintes (`ref_pos_service.is_restreinte`) sans le droit correspondant. */
+  private async positionViolation(current: RniUser, newPosition: number | null | undefined, previous?: number | null) {
+    const restricted = [...(await this.positions()).values()].filter((p) => p.is_restreinte).map((p) => p.id_pos_service);
+    return checkPositionAllowed(peut(current, Droit.PLANNING_POSITIONS_RESTREINTES), restricted, newPosition, previous);
   }
 
   private async assertPosition(id: number | undefined): Promise<void> {
@@ -399,7 +406,7 @@ export class PlanningService {
 
   async create(current: RniUser, dto: PlanningInputDto): Promise<PlanningDto> {
     const target = await this.target(current, dto.nigend);
-    const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service);
+    const v = (await this.bounds(dto)) ?? (await this.positionViolation(current, dto.id_pos_service));
     if (v) {
       this.logger.debug(`Création refusée (${current.nigend} → ${target.nigend}, ${periode(dto)}) : ${v.code} ${v.message}`);
       throw BusinessException.from(v);
@@ -498,9 +505,9 @@ export class PlanningService {
   ): Promise<{ removed: number[]; kept: number }> {
     const overlaps = await this.repo.overlapping(target.id_user, start, end, [], transaction, true);
     for (const o of overlaps) {
-      const v = checkPositionAllowed(current.id_profil, null, o.id_pos_service);
+      const v = await this.positionViolation(current, null, o.id_pos_service);
       if (v) {
-        this.logger.warn(`Plage ${o.id_planning} (position ${o.id_pos_service}) non ${verbe} : réservée aux référents et au GIGN (${current.nigend}, profil ${current.id_profil}).`);
+        this.logger.warn(`Plage ${o.id_planning} (position ${o.id_pos_service}) non ${verbe} : position restreinte (${current.nigend}, profil ${current.id_profil}).`);
         throw BusinessException.from({ ...v, message: `${v.message} Une plage existante ne peut pas être ${verbe}.` });
       }
     }
@@ -536,7 +543,7 @@ export class PlanningService {
     if (dto.nigend && dto.nigend !== existing.nigend) throw BusinessException.forbidden('Le personnel d’une plage ne peut pas être changé.');
     const target = await this.target(current, existing.nigend);
     await this.assertNotFrozen(existing, 'modifiée');
-    const v = (await this.bounds(dto)) ?? checkPositionAllowed(current.id_profil, dto.id_pos_service, existing.id_pos_service);
+    const v = (await this.bounds(dto)) ?? (await this.positionViolation(current, dto.id_pos_service, existing.id_pos_service));
     if (v) {
       this.logger.debug(`Modification du planning ${id} refusée (${current.nigend}) : ${v.code} ${v.message}`);
       throw BusinessException.from(v);
@@ -566,7 +573,7 @@ export class PlanningService {
     const existing = await this.repo.findById(id);
     if (!existing) throw BusinessException.notFound('Planning introuvable.');
     await this.target(current, existing.nigend);
-    const v = checkPositionAllowed(current.id_profil, null, existing.id_pos_service);
+    const v = await this.positionViolation(current, null, existing.id_pos_service);
     if (v) throw BusinessException.from(v);
     await this.assertNotFrozen(existing, 'supprimée');
     await this.plannings.destroy({ where: { id_planning: id } });
@@ -586,7 +593,7 @@ export class PlanningService {
       if (!outer) throw BusinessException.notFound('Planning initial introuvable.');
       if (dto.nigend && dto.nigend !== outer.nigend) throw BusinessException.forbidden('Le personnel d’une plage ne peut pas être changé.');
       const target = await this.target(current, outer.nigend);
-      const v = checkPositionAllowed(current.id_profil, dto.id_pos_service, outer.id_pos_service);
+      const v = await this.positionViolation(current, dto.id_pos_service, outer.id_pos_service);
       if (v) throw BusinessException.from(v);
       await this.assertPosition(dto.id_pos_service);
       const result = computeInsertion(outer, dto, new Date(), jours);

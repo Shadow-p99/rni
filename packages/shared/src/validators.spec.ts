@@ -1,5 +1,6 @@
 import { dedupeNeo, geolocIndicatif, isValidPhone, hasNameOrFirstName } from './validators.js';
-import { ADMIN_PROFILS, PLANNING_WRITE_PROFILS, assignableProfils, canWritePlanning, defaultPerimetre, Profil, listableProfils } from './profils.js';
+import { defaultPerimetre, Profil } from './profils.js';
+import { DROIT_CODES, Droit, LOCKED_DROITS, hasDroit, porteeOf } from './droits.js';
 
 describe('validateurs', () => {
   it('téléphones FR et internationaux', () => {
@@ -20,24 +21,21 @@ describe('validateurs', () => {
   });
 });
 
-describe('profils', () => {
-  it('écriture planning (BR-PLA-7) : GIGN, super administrateur, référents et négociateur', () => {
-    const allowed = Object.values(Profil).filter((v): v is Profil => typeof v === 'number' && canWritePlanning(v));
-    expect(allowed.sort()).toEqual([Profil.GIGN, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.REFERENT_ADJOINT, Profil.SUPER_ADMIN].sort());
-    for (const p of [Profil.LECTURE_SEULE, Profil.FICHE_CRISE, Profil.OMS, null, undefined, 99]) expect(canWritePlanning(p)).toBe(false);
-    // Cohérent avec la règle d'écriture par défaut de l'API (administrateurs + négociateur)
-    for (const p of PLANNING_WRITE_PROFILS) expect([...ADMIN_PROFILS, Profil.NEGOCIATEUR]).toContain(p);
+describe('droits', () => {
+  it('codes uniques, administration verrouillée', () => {
+    expect(new Set(DROIT_CODES).size).toBe(DROIT_CODES.length);
+    expect(LOCKED_DROITS).toContain(Droit.ADMIN_ACCES);
   });
+  it('lecture d’une carte de droits', () => {
+    const d = { [Droit.PLANNING_ECRIRE]: 'soi' as const };
+    expect(hasDroit(d, Droit.PLANNING_ECRIRE)).toBe(true);
+    expect(hasDroit(d, Droit.FORMULAIRE_VOIR)).toBe(false);
+    expect(porteeOf(d, Droit.PLANNING_ECRIRE)).toBe('soi');
+    expect(porteeOf(null, Droit.PLANNING_ECRIRE)).toBeNull();
+  });
+});
 
-  it('profils attribuables (BR-GPU-3)', () => {
-    expect(assignableProfils(Profil.GIGN)).toContain(Profil.OMS);
-    expect(assignableProfils(Profil.REFERENT)).not.toContain(Profil.GIGN);
-    expect(assignableProfils(Profil.NEGOCIATEUR)).toEqual([]);
-  });
-  it('profils listés (BR-GPU-1)', () => {
-    expect(listableProfils(Profil.REFERENT)).toEqual([3, 4, 7]);
-    expect(listableProfils(Profil.GIGN)).toContain(Profil.OMS);
-  });
+describe('profils', () => {
   it('périmètres par défaut (BR-AUTH-6) : carte selon le cahier des charges, planning restreint', () => {
     expect(defaultPerimetre(Profil.GIGN, 'carte')).toBe('national');
     expect(defaultPerimetre(Profil.LECTURE_SEULE, 'carte')).toBe('national');
@@ -48,9 +46,7 @@ describe('profils', () => {
     expect(defaultPerimetre(Profil.SUPER_ADMIN, 'carte')).toBe('national');
     expect(defaultPerimetre(Profil.SUPER_ADMIN, 'planning')).toBe('national');
   });
-  it('super administrateur : seul à pouvoir attribuer son profil', () => {
-    expect(assignableProfils(Profil.SUPER_ADMIN)).toContain(Profil.SUPER_ADMIN);
-    expect(assignableProfils(Profil.GIGN)).not.toContain(Profil.SUPER_ADMIN);
-    expect(listableProfils(Profil.SUPER_ADMIN)).toContain(Profil.SUPER_ADMIN);
+  it('profil créé dans l’administration : périmètre restreint à sa région par défaut', () => {
+    expect(defaultPerimetre(42, 'carte')).toBe('region');
   });
 });

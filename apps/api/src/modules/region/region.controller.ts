@@ -1,6 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { PerimetreModule, RegionCountsDto, RegionDto, compactToIso, isIsoDate } from '@rni/shared';
+import { Droit, PerimetreModule, RegionCountsDto, RegionDto, compactToIso, isIsoDate } from '@rni/shared';
 import { CurrentUser, type RniUser } from '../../common/auth/current-user.js';
+import { RequireDroit } from '../../common/auth/decorators.js';
 import { PerimetreService } from '../../common/auth/perimetre.service.js';
 import { BusinessException } from '../../common/business.exception.js';
 import { CacheService, CacheTag, CacheTtl, JsonPayload, regionsKey } from '../../common/cache/cache.service.js';
@@ -58,6 +59,7 @@ export class RegionController {
 
   /** Compteurs par région × position de service au créneau courant (ex-v_sum_services). */
   @Get('getNbPositionServiceByRegion')
+  @RequireDroit(Droit.CARTE_VOIR, Droit.PLANNING_VOIR)
   async counts(@CurrentUser() user: RniUser): Promise<JsonPayload> {
     // Partagé par tous les utilisateurs de même périmètre ; la clé change à chaque créneau (08h / 18h).
     const regionsVisible = user.perimetres.planning;
@@ -84,6 +86,7 @@ export class RegionController {
 
   /** Mobile : compteurs nationaux / région par jour, créneau et position (plage YYYYMMDD). */
   @Get('getNbPositionServiceAllRegionMobile')
+  @RequireDroit(Droit.CARTE_VOIR, Droit.PLANNING_VOIR)
   mobile(@CurrentUser() user: RniUser, @Query('from') from: string, @Query('to') to: string, @Query('region') region?: string) {
     if (!from || !to) throw BusinessException.missing('from / to');
     const iso = (v: string) => (/^\d{8}$/.test(v) ? compactToIso(v) : v);

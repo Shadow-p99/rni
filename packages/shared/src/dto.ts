@@ -1,7 +1,9 @@
 /**
  * Contrats d'échange API ↔ client.
  */
-import type { FormulaireContent } from './formulaire.js';
+import type { MessageType } from './errors.js';
+import type { DroitCode, DroitModule, DroitsMap, Portee } from './droits.js';
+import type { FieldKind, FormulaireContent, SectionId } from './formulaire.js';
 import type { Perimetre, PerimetreModule } from './profils.js';
 
 export interface PositionServiceDto {
@@ -9,6 +11,10 @@ export interface PositionServiceDto {
   libelle: string;
   color: string;
   is_actif: boolean;
+  /** BR-PLA-4 : réservée aux profils ayant le droit `planning.positions_restreintes`. */
+  is_restreinte: boolean;
+  /** BR-CAR-4 : priorité de la couleur d'un cluster (1 = la plus forte), `null` = jamais. */
+  priorite_cluster: number | null;
 }
 
 export interface CreneauDto {
@@ -21,6 +27,8 @@ export interface ProfilDto {
   code: string | null;
   libelle: string;
   classement: number;
+  /** Le profil porte un planning (apparaît sur la carte et le planning). */
+  has_planning: boolean;
 }
 
 export interface RegionDto {
@@ -47,8 +55,12 @@ export interface CurrentUserDto {
   regions_visibles: number[] | null;
   /** Régions visibles par module ; `null` = national. */
   perimetres: Record<PerimetreModule, number[] | null>;
-  is_admin: boolean;
-  is_super_admin: boolean;
+  /** Droits du profil (paramétrés dans Administration › Droits). */
+  droits: DroitsMap;
+  /** Profils listés dans la gestion du personnel. */
+  profils_visibles: number[];
+  /** Profils que l'utilisateur peut attribuer et dont il gère les comptes. */
+  profils_gerables: number[];
   geoloc_id_geoloc: string | null;
   geoloc_indicatif: string | null;
   geoloc_bool_geoloc: boolean;
@@ -304,6 +316,10 @@ export interface FormulaireDto extends FormulaireContent {
   is_closed: boolean;
   created_at: string;
   updated_at: string;
+  /** Actions permises à l'utilisateur sur cette fiche (droits et état), calculées par l'API. */
+  can_modifier: boolean;
+  can_cloturer: boolean;
+  can_supprimer: boolean;
 }
 
 export interface FormulaireFilter {
@@ -520,4 +536,133 @@ export interface LogSettingsDto {
   defaut: { level: LogThreshold; sql: boolean };
   contextes_connus: string[];
   derniere_modification: { par: string; nom: string | null; le: string } | null;
+}
+
+// -----------------------------------------------------------------------------
+// Paramétrage (Administration du super administrateur)
+// -----------------------------------------------------------------------------
+
+/** Droit du catalogue (`ref_droit`). */
+export interface DroitDefDto {
+  code: DroitCode;
+  module: DroitModule;
+  libelle: string;
+  description: string | null;
+  /** Portées proposées (`['oui']` pour un droit simple). */
+  portees: Portee[];
+  ordre: number;
+}
+
+export interface ProfilDroitsDto {
+  id_profil: number;
+  libelle: string;
+  droits: DroitsMap;
+  /** Droits non modifiables pour ce profil. */
+  locked: DroitCode[];
+  nb_utilisateurs: number;
+}
+
+export interface DroitsMatrixDto {
+  catalogue: DroitDefDto[];
+  profils: ProfilDroitsDto[];
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface DroitsUpdateDto {
+  /** `portee: null` = droit retiré. */
+  items: { id_profil: number; code: DroitCode; portee: Portee | null }[];
+}
+
+export interface ProfilAdminDto extends ProfilDto {
+  nb_utilisateurs: number;
+  /** Profil livré (1 à 8) : non supprimable. */
+  systeme: boolean;
+  /** Profils listés / gérés dans la gestion du personnel par ce profil. */
+  visibles: number[];
+  gerables: number[];
+}
+
+export interface ProfilInputDto {
+  libelle: string;
+  code: string | null;
+  classement: number;
+  has_planning: boolean;
+}
+
+export interface ProfilCreateDto extends ProfilInputDto {
+  /** Profil modèle dont les droits, périmètres et règles de gestion sont copiés. */
+  modele: number | null;
+}
+
+export interface ProfilGestionUpdateDto {
+  items: { id_profil: number; id_profil_cible: number; visible: boolean; gerable: boolean }[];
+}
+
+export interface PositionInputDto {
+  libelle: string;
+  color: string;
+  is_actif: boolean;
+  is_restreinte: boolean;
+  priorite_cluster: number | null;
+}
+
+export interface TypeCriseDto {
+  id_type_crise: number;
+  libelle: string;
+  ordre: number;
+  is_actif: boolean;
+}
+
+export interface FormulaireSectionDto {
+  id: SectionId;
+  libelle: string;
+  imprimable: boolean;
+  ordre: number;
+}
+
+export interface FormulaireChampDto {
+  key: string;
+  label: string;
+  section: SectionId;
+  kind: FieldKind;
+  required: boolean;
+  ordre: number;
+}
+
+/** Structure de la fiche de crise (`GET /referentiel/formulaire`). */
+export interface FormulaireConfigDto {
+  crises: TypeCriseDto[];
+  sections: FormulaireSectionDto[];
+  champs: FormulaireChampDto[];
+}
+
+export interface FormulaireConfigUpdateDto {
+  /** Liste complète des types (sans `id_type_crise` = nouveau). */
+  crises: { id_type_crise?: number | null; libelle: string; is_actif: boolean }[];
+  sections: { id: SectionId; libelle: string; imprimable: boolean }[];
+  champs: { key: string; label: string; required: boolean; ordre: number }[];
+}
+
+/** Paramètre applicatif (`t_param_app`). */
+export interface ParamAppDto {
+  cle: string;
+  /** Masquée (`null`) pour un secret. */
+  valeur: string | null;
+  description: string | null;
+  is_front: boolean;
+  secret: boolean;
+  /** Réglé par un autre écran (ex. Journalisation) : lecture seule ici. */
+  gere_par: string | null;
+}
+
+export interface ParamAppUpdateDto {
+  cle: string;
+  valeur: string;
+}
+
+export interface MessageDto {
+  code_message: string;
+  libelle: string;
+  type: MessageType;
 }

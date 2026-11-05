@@ -1,9 +1,15 @@
 /**
- * Fiche de crise (« formulaire négociation ») — catalogue des champs, cf. §6.2.
- * Ce catalogue pilote à la fois le formulaire client, l'export PDF et la validation API.
+ * Fiche de crise (« formulaire négociation ») — catalogue **technique** des champs, cf. §6.2 :
+ * clé (colonne de `t_formulaire`), nature et section. Libellés, caractère obligatoire, ordre,
+ * libellés et impression des sections se règlent en base (`t_formulaire_champ`,
+ * `t_formulaire_section`) ; les valeurs ci-dessous sont celles livrées (et le repli).
  */
 
-export const CRISES = [
+/**
+ * Types de crise livrés : la liste de référence est en base (`ref_type_crise`, Administration ›
+ * Fiche de crise). Le premier (« Aucun ») est la valeur par défaut.
+ */
+export const DEFAULT_CRISES = [
   'Aucun',
   'Terrorisme',
   "Prise d'otage",
@@ -13,8 +19,7 @@ export const CRISES = [
   'Retranché',
   'Suicidaire',
 ] as const;
-
-export type TypeCrise = (typeof CRISES)[number];
+export const CRISE_PAR_DEFAUT = 'Aucun';
 
 export const NOTE_MIN = 0;
 export const NOTE_MAX = 10;
