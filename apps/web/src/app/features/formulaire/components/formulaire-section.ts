@@ -1,6 +1,6 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
 import { FormControl } from '@angular/forms';
-import { SECTIONS, SectionId } from '@rni/shared';
+import { SectionId } from '@rni/shared';
 import { AddressAutocomplete } from '../../../shared/ui/address-autocomplete';
 import { FormulaireEditorStore } from '../formulaire-editor.store';
 import { fieldsOf } from '../formulaire-form';
@@ -26,7 +26,7 @@ import { FormulaireField } from './formulaire-field';
               <label class="label">{{ f.label }}</label>
               <rni-address-autocomplete
                 [minChars]="3"
-                [disabled]="store.closed()"
+                [disabled]="store.closed() || !store.canEdit()"
                 [invalid]="store.addressInvalid() || store.addressMissing()"
                 [text]="store.addressText()"
                 (textChange)="store.setAddressText($event)"
@@ -48,8 +48,8 @@ export class FormulaireSection {
   protected readonly store = inject(FormulaireEditorStore);
   readonly section = input.required<SectionId>();
   readonly open = signal(true);
-  protected readonly fields = computed(() => fieldsOf(this.section()));
-  protected readonly libelle = computed(() => SECTIONS.find((s) => s.id === this.section())?.libelle ?? '');
+  protected readonly fields = computed(() => fieldsOf(this.section(), this.store.structure.champs()));
+  protected readonly libelle = computed(() => this.store.structure.sectionLibelle(this.section()));
 
   protected control(key: string): FormControl {
     return this.store.form.get(key) as FormControl;

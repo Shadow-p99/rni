@@ -1,7 +1,7 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { PROFIL_LIBELLES, UserDto, listableProfils } from '@rni/shared';
+import { UserDto } from '@rni/shared';
 import { AuthService } from '../../core/auth/auth.service';
 import { AsyncView } from '../../shared/ui/async-view';
 import { PageHeader } from '../../shared/ui/page-header';
@@ -13,6 +13,7 @@ import { UserDeleteDialog } from './components/user-delete-dialog';
 import { UserEditDialog } from './components/user-edit-dialog';
 import { UsersTable } from './components/users-table';
 import { GestionStore } from './gestion.store';
+import { ReferentielService } from '../../core/referentiel/referentiel.service';
 
 type Dialog = { kind: 'add' } | { kind: 'edit'; user: UserDto } | { kind: 'delete'; user: UserDto };
 
@@ -29,7 +30,7 @@ type Dialog = { kind: 'add' } | { kind: 'edit'; user: UserDto } | { kind: 'delet
     <div class="mx-auto flex w-full max-w-7xl flex-col gap-3 p-3 pb-16 desk:p-4 desk:pb-16">
       <rni-page-header title="Gestion du personnel" [subtitle]="(page.total | number) + (page.capped ? '+' : '') + ' compte(s)'">
         <rni-search-input class="min-w-64 flex-1" label="Recherche" placeholder="Nom, prénom, nigend, code ou libellé d'unité…" [value]="store.q()" (searched)="store.search($event)" />
-        @if (auth.isGign()) {
+        @if (auth.gestionNationale()) {
           <rni-region-select class="w-56" label="Région" scope="all" [value]="store.region()" (valueChange)="store.setRegion($event)" />
         } @else {
           <p class="self-center text-sm text-slate-500">Région : {{ auth.user()?.libelle_region }}</p>
@@ -39,7 +40,7 @@ type Dialog = { kind: 'add' } | { kind: 'edit'; user: UserDto } | { kind: 'delet
           <select id="g-profil" class="input w-44" [ngModel]="store.profil()" (ngModelChange)="store.setProfil($event)">
             <option [ngValue]="null">Tous</option>
             @for (id of listable(); track id) {
-              <option [ngValue]="id">{{ libelles[id] }}</option>
+              <option [ngValue]="id">{{ ref.profilLibelle(id) }}</option>
             }
           </select>
         </div>
@@ -90,14 +91,14 @@ type Dialog = { kind: 'add' } | { kind: 'edit'; user: UserDto } | { kind: 'delet
 })
 export class GestionPage {
   protected readonly auth = inject(AuthService);
+  protected readonly ref = inject(ReferentielService);
   protected readonly store = inject(GestionStore);
   protected readonly dialog = signal<Dialog | null>(null);
   protected readonly dialogUser = computed(() => {
     const d = this.dialog();
     return d && d.kind !== 'add' ? d.user : null;
   });
-  protected readonly libelles = PROFIL_LIBELLES;
-  protected readonly listable = computed(() => listableProfils(this.auth.profil() ?? 0));
+  protected readonly listable = computed(() => this.ref.sortProfils(this.auth.profilsVisibles()));
   protected readonly canManage = (u: UserDto) => this.auth.canManageUser(u);
 
   constructor() {

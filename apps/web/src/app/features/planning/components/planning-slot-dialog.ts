@@ -8,10 +8,7 @@ import {
   PlanningDto,
   PlageBounds,
   PlanningInputDto,
-  Profil,
-  RESTRICTED_POSITIONS,
   UserDto,
-  allowedPositionsFor,
   computeInsertion,
   plageSlots,
   toSlot,
@@ -205,20 +202,23 @@ export class PlanningSlotDialog implements OnInit {
   private initialAddress = '';
 
   protected readonly existing = computed(() => this.init().planning ?? null);
-  /** Personnel non modifiable : plage existante, case du planning ou négociateur (lui-même). */
-  protected readonly personLocked = computed(() => !!this.existing() || !!this.init().user || this.auth.profil() === Profil.NEGOCIATEUR);
+  /** Personnel non modifiable : plage existante, case du planning, ou droit limité à soi-même. */
+  protected readonly personLocked = computed(() => !!this.existing() || !!this.init().user || this.auth.planningSoiSeul());
 
-  /** BR-PLA-3 : positions actives, restreintes pour les profils ∉ {1, 3, 7}. */
-  protected readonly positions = computed(() => {
-    const allowed = allowedPositionsFor(this.auth.profil() ?? 0);
-    return this.ref.activePositions().filter((p) => allowed.includes(p.id_pos_service));
-  });
+  /** Position restreinte (Alerte, Formateur… : Administration › Positions) hors des droits du profil. */
+  private readonly forbidden = (id: number) => !this.auth.canRestrictedPositions() && this.ref.restrictedPositions().includes(id);
+  private readonly restrictedLabels = computed(() =>
+    this.ref.positions().filter((p) => p.is_restreinte).map((p) => p.libelle).join(', ') || 'restreintes',
+  );
+
+  /** BR-PLA-3 : positions actives, sans les positions restreintes si le profil n'y a pas droit. */
+  protected readonly positions = computed(() => this.ref.activePositions().filter((p) => !this.forbidden(p.id_pos_service)));
 
   protected readonly readOnlyReason = computed(() => {
     if (!this.auth.canWritePlanning()) return 'Votre profil est en consultation.';
     const e = this.existing();
-    if (e && this.auth.profil() === Profil.NEGOCIATEUR && RESTRICTED_POSITIONS.includes(e.id_pos_service)) {
-      return 'Les positions Alerte et Formateur ne peuvent être modifiées que par un référent ou le GIGN.';
+    if (e && this.forbidden(e.id_pos_service)) {
+      return `Votre profil ne peut pas modifier les positions restreintes (${this.restrictedLabels()}).`;
     }
     // Planning figé : demi-journée cliquée (ou début de la plage / de la sélection) avant la borne
     const i = this.init();
@@ -244,7 +244,7 @@ export class PlanningSlotDialog implements OnInit {
     if (i.user) {
       this.nigend.set(i.user.nigend);
       this.userLabel.set(i.user.label);
-    } else if (this.auth.profil() === Profil.NEGOCIATEUR) {
+    } else if (this.auth.planningSoiSeul()) {
       const u = this.auth.user()!;
       this.nigend.set(u.nigend);
       this.userLabel.set(`${u.nigend} — ${u.prenom} ${u.nom}`);
@@ -341,8 +341,8 @@ export class PlanningSlotDialog implements OnInit {
       const ov = await this.action.run(() => this.api.overlaps(body, { silent: true }));
       if (!ov.ok) return;
       if (ov.value.length) {
-        if (this.auth.profil() === Profil.NEGOCIATEUR && ov.value.some((p) => RESTRICTED_POSITIONS.includes(p.id_pos_service))) {
-          return this.invalid('La période contient une plage Alerte ou Formateur, que seul un référent ou le GIGN peut écraser.');
+        if (ov.value.some((p) => this.forbidden(p.id_pos_service))) {
+          return this.invalid(`La période contient une position restreinte (${this.restrictedLabels()}) que votre profil ne peut pas écraser.`);
         }
         if (!(await this.confirmOverwrite(ov.value))) return;
         ecraser = true;
@@ -383,8 +383,8 @@ export class PlanningSlotDialog implements OnInit {
     const ov = await this.action.run(() => this.api.overlaps(periode, { silent: true }));
     if (!ov.ok) return;
     if (!ov.value.length) return this.invalid('Aucun planning sur la période sélectionnée : rien à supprimer.');
-    if (this.auth.profil() === Profil.NEGOCIATEUR && ov.value.some((p) => RESTRICTED_POSITIONS.includes(p.id_pos_service))) {
-      return this.invalid('La période contient une plage Alerte ou Formateur, que seul un référent ou le GIGN peut supprimer.');
+    if (ov.value.some((p) => this.forbidden(p.id_pos_service))) {
+      return this.invalid(`La période contient une position restreinte (${this.restrictedLabels()}) que votre profil ne peut pas supprimer.`);
     }
     const span = `du ${fmt(periode.date_debut)} (${cr(periode.id_creneaux_debut)}) au ${fmt(periode.date_fin)} (${cr(periode.id_creneaux_fin)})`;
     const ok = await this.confirm.ask(

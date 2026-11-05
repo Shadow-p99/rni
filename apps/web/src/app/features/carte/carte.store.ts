@@ -67,7 +67,8 @@ export class CarteStore {
   readonly placingCrise = signal(false);
   readonly isochrones = new AsyncState<IsochroneCollection | null>(null);
   readonly isoVisible = signal(true);
-  readonly canCrise = this.auth.hasExtendedRights;
+  /** Point de crise et isochrones : droit `carte.isochrone`. */
+  readonly canCrise = this.auth.canIsochrone;
 
   /**
    * Cadrage initial : sur sa région dès que le périmètre « carte » du profil n'est pas national

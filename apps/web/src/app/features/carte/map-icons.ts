@@ -1,4 +1,4 @@
-import { CLUSTER_COLOR_PRIORITY, NO_PLANNING_COLOR, PersonnelPointProperties } from '@rni/shared';
+import { NO_PLANNING_COLOR, PersonnelPointProperties } from '@rni/shared';
 import type * as Leaflet from 'leaflet';
 import { L } from '../../core/map/leaflet';
 
@@ -14,13 +14,16 @@ export function personIcon(p: PersonnelPointProperties): Leaflet.DivIcon {
   });
 }
 
-/** BR-CAR-4 : couleur d'un cluster — priorité Alerte puis Disponible, sinon première position planifiée. */
-export function clusterColor(children: PersonnelPointProperties[]): string {
-  for (const pos of CLUSTER_COLOR_PRIORITY) {
+/**
+ * BR-CAR-4 : couleur d'un cluster — positions prioritaires paramétrées en base (par défaut Alerte
+ * puis Disponible), sinon première position planifiée.
+ */
+export function clusterColor(children: PersonnelPointProperties[], priority: readonly number[] = [4, 1], noPlanning = NO_PLANNING_COLOR): string {
+  for (const pos of priority) {
     const hit = children.find((p) => p.id_planning && p.id_pos_service === pos);
     if (hit) return hit.color;
   }
-  return children.find((p) => p.id_planning)?.color ?? NO_PLANNING_COLOR;
+  return children.find((p) => p.id_planning)?.color ?? noPlanning;
 }
 
 export function clusterIcon(count: number, color: string): Leaflet.DivIcon {

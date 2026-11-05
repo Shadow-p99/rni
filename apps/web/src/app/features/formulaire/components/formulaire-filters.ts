@@ -9,7 +9,7 @@ import { RegionSelect } from '../../../shared/ui/region-select';
   imports: [FormsModule, RegionSelect],
   host: { class: 'contents' },
   template: `
-    @if (auth.isGign()) {
+    @if (auth.formulaireNational()) {
       <rni-region-select class="w-56" label="Région" nullLabel="Toutes" scope="all" [(value)]="region" />
     }
     <div>

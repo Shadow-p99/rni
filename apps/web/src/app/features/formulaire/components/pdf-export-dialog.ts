@@ -1,5 +1,6 @@
-import { Component, input, output, signal } from '@angular/core';
-import { SECTIONS, SectionId } from '@rni/shared';
+import { Component, inject, input, output, signal } from '@angular/core';
+import { SectionId } from '@rni/shared';
+import { FormulaireConfigService } from '../../../core/formulaire/formulaire-config.service';
 import { Modal } from '../../../shared/ui/modal';
 
 /** BR-FOR-8 : choix des sections imprimées (le bloc Profil est systématique). */
@@ -8,7 +9,7 @@ import { Modal } from '../../../shared/ui/modal';
   imports: [Modal],
   template: `
     <rni-modal [open]="true" title="Exporter la fiche en PDF" size="sm" [locked]="busy()" (closed)="closed.emit()">
-      <p class="mb-3 text-sm text-slate-600">Le bloc « Profil de l'individu » est toujours imprimé. Sections complémentaires :</p>
+      <p class="mb-3 text-sm text-slate-600">Le premier bloc (profil de l'individu) est toujours imprimé. Sections complémentaires :</p>
       @for (s of printable; track s.id) {
         <label class="flex items-center gap-2 py-1 text-sm">
           <input type="checkbox" class="accent-rni-700" [checked]="chosen().has(s.id)" (change)="toggle(s.id)" />{{ s.libelle }}
@@ -25,7 +26,8 @@ export class PdfExportDialog {
   readonly busy = input(false);
   readonly closed = output<void>();
   readonly export = output<SectionId[]>();
-  protected readonly printable = SECTIONS.filter((s) => s.imprimable);
+  /** Sections imprimables (Administration › Fiche de crise), hors Profil toujours imprimé. */
+  protected readonly printable = inject(FormulaireConfigService).sections().filter((s) => s.imprimable && s.id !== 'profil');
   protected readonly chosen = signal<Set<SectionId>>(new Set(this.printable.map((s) => s.id)));
 
   toggle(id: SectionId): void {

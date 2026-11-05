@@ -50,7 +50,7 @@ export class GestionStore {
     this.page.set(page);
     this.size.set(size);
     this.q.set(qp.get('q') ?? '');
-    this.region.set(this.auth.isGign() ? num('region') : null);
+    this.region.set(this.auth.gestionNationale() ? num('region') : null);
     this.profil.set(num('profil'));
     const sort = qp.get('sort') as UserSort | null;
     this.sort.set(sort && USER_SORTS.includes(sort) ? sort : 'defaut');

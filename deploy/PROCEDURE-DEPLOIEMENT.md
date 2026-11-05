@@ -100,6 +100,7 @@ Le script :
 | Arrêt gracieux (25 s max) | `systemctl stop rni-api` |
 | État des migrations | `cd /srv/nodejs/rni/current && sudo -u rni env $(cat /etc/rni/rni-api.env \| xargs) node dist/migrate.js --status` |
 | Vider le cache de tous les workers | `DELETE /rni/api/admin/cache` (super administrateur) |
+| Droits, profils, positions, fiche de crise, paramètres | Écran Administration (cf. `docs/PARAMETRAGE.md`) |
 | Changer le niveau de journalisation (à chaud) | `UPDATE t_param_app SET valeur = 'debug' WHERE cle_param_app = 'rni.log.level';` (cf. README « Journalisation ») |
 
 Sondes : `/rni/api/health/live` (processus vivant) et `/rni/api/health/ready` (base joignable,

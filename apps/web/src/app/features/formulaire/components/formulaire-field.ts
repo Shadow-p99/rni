@@ -1,6 +1,7 @@
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, inject, input } from '@angular/core';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { CRISES, FieldDef, NOTE_MAX, NOTE_MIN } from '@rni/shared';
+import { FormulaireChampDto, NOTE_MAX, NOTE_MIN } from '@rni/shared';
+import { FormulaireConfigService } from '../../../core/formulaire/formulaire-config.service';
 
 /** Un champ de la fiche, rendu selon son type (texte, zone, note, liste, téléphone). */
 @Component({
@@ -11,6 +12,9 @@ import { CRISES, FieldDef, NOTE_MAX, NOTE_MIN } from '@rni/shared';
     @let d = def();
     <label class="label" [for]="id()">
       {{ d.label }}
+      @if (d.required && d.kind !== 'note') {
+        <span class="text-red-600" aria-hidden="true">*</span>
+      }
       @if (d.kind === 'note') {
         <span class="font-normal normal-case text-slate-400">({{ noteMin }} à {{ noteMax }})</span>
       }
@@ -21,7 +25,7 @@ import { CRISES, FieldDef, NOTE_MAX, NOTE_MIN } from '@rni/shared';
       }
       @case ('select') {
         <select [id]="id()" class="input" [formControl]="control()">
-          @for (c of crises; track c) {
+          @for (c of crises(); track c) {
             <option [value]="c">{{ c }}</option>
           }
         </select>
@@ -45,11 +49,17 @@ import { CRISES, FieldDef, NOTE_MAX, NOTE_MIN } from '@rni/shared';
   `,
 })
 export class FormulaireField {
-  readonly def = input.required<FieldDef>();
+  readonly def = input.required<Pick<FormulaireChampDto, 'key' | 'label' | 'kind' | 'required'>>();
   readonly control = input.required<FormControl>();
   readonly submitted = input(false);
 
-  protected readonly crises = CRISES;
+  private readonly structure = inject(FormulaireConfigService);
+  /** Types de crise actifs (Administration › Fiche de crise) + valeur enregistrée si désactivée depuis. */
+  protected readonly crises = computed(() => {
+    const actives = this.structure.crisesActives();
+    const v = this.control().value as string | null;
+    return v && !actives.includes(v) ? [...actives, v] : actives;
+  });
   protected readonly noteMin = NOTE_MIN;
   protected readonly noteMax = NOTE_MAX;
   protected readonly id = computed(() => `f-${this.def().key}`);

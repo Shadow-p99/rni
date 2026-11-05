@@ -67,13 +67,13 @@ export class Header {
   protected readonly mentionsUrl = this.config.mentionsUrl;
 
   protected readonly links = computed(() => {
-    const out = [
-      { path: '/carte', label: 'Carte' },
-      { path: '/planning', label: 'Planning' },
-    ];
+    // Menu selon les droits du profil (Administration › Droits)
+    const out: { path: string; label: string }[] = [];
+    if (this.auth.canCarte()) out.push({ path: '/carte', label: 'Carte' });
+    if (this.auth.canPlanning()) out.push({ path: '/planning', label: 'Planning' });
     if (this.auth.canFormulaire()) out.push({ path: '/formulaire', label: 'Fiches de crise' });
-    if (this.auth.isAdmin()) out.push({ path: '/gestion', label: 'Gestion du personnel' });
-    if (this.auth.isSuperAdmin()) out.push({ path: '/administration', label: 'Administration' });
+    if (this.auth.canGestion()) out.push({ path: '/gestion', label: 'Gestion du personnel' });
+    if (this.auth.canAdmin()) out.push({ path: '/administration', label: 'Administration' });
     return out;
   });
 }

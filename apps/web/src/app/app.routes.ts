@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
-import { formulaireGuard, isAdminGuard, isUserGuard, referentielResolver, superAdminGuard } from './core/auth/auth.guards';
+import { Droit } from '@rni/shared';
+import { droitGuard, formulaireConfigResolver, homeRedirectGuard, isUserGuard, referentielResolver } from './core/auth/auth.guards';
 import { unsavedChangesGuard } from './core/platform/unsaved-changes.guard';
 
 export const routes: Routes = [
@@ -10,16 +11,19 @@ export const routes: Routes = [
     resolve: { referentiel: referentielResolver },
     runGuardsAndResolvers: 'always',
     children: [
-      { path: '', pathMatch: 'full', redirectTo: 'carte' },
+      // Racine : première page accessible au profil (carte, sinon planning, fiches…)
+      { path: '', pathMatch: 'full', canActivate: [homeRedirectGuard], children: [] },
       {
         path: 'carte',
         title: 'Carte opérationnelle — RNI',
+        canActivate: [droitGuard(Droit.CARTE_VOIR)],
         loadComponent: () => import('./features/carte/carte-page').then((m) => m.CartePage),
       },
       {
         // Une seule page : interface bureau ou mobile selon la largeur d'écran
         path: 'planning',
         title: 'Planning — RNI',
+        canActivate: [droitGuard(Droit.PLANNING_VOIR)],
         loadComponent: () => import('./features/planning/planning-page').then((m) => m.PlanningPage),
       },
       // Ancienne adresse de la version mobile (favoris, liens partagés)
@@ -27,25 +31,26 @@ export const routes: Routes = [
       {
         path: 'formulaire',
         title: 'Fiches de crise — RNI',
-        canActivate: [formulaireGuard],
+        canActivate: [droitGuard(Droit.FORMULAIRE_VOIR)],
         loadComponent: () => import('./features/formulaire/formulaire-list-page').then((m) => m.FormulaireListPage),
       },
       {
         path: 'formulaire/:id',
         title: 'Fiche de crise — RNI',
-        canActivate: [formulaireGuard],
+        canActivate: [droitGuard(Droit.FORMULAIRE_VOIR)],
+        resolve: { structure: formulaireConfigResolver },
         canDeactivate: [unsavedChangesGuard],
         loadComponent: () => import('./features/formulaire/formulaire-edit-page').then((m) => m.FormulaireEditPage),
       },
       {
         path: 'gestion',
         title: 'Gestion du personnel — RNI',
-        canActivate: [isAdminGuard],
+        canActivate: [droitGuard(Droit.GESTION_ACCES)],
         loadComponent: () => import('./features/gestion/gestion-page').then((m) => m.GestionPage),
       },
       {
         path: 'administration',
-        canActivate: [superAdminGuard],
+        canActivate: [droitGuard(Droit.ADMIN_ACCES)],
         loadComponent: () => import('./features/admin/admin-layout').then((m) => m.AdminLayout),
         children: [
           { path: '', pathMatch: 'full', redirectTo: 'tableau-de-bord' },
@@ -64,6 +69,36 @@ export const routes: Routes = [
             title: 'Réglages des journaux — Administration RNI',
             canDeactivate: [unsavedChangesGuard],
             loadComponent: () => import('./features/admin/log-settings/log-settings-page').then((m) => m.LogSettingsPage),
+          },
+          {
+            path: 'droits',
+            title: 'Droits — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/droits/droits-page').then((m) => m.DroitsPage),
+          },
+          {
+            path: 'profils',
+            title: 'Profils — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/profils/profils-page').then((m) => m.ProfilsPage),
+          },
+          {
+            path: 'positions',
+            title: 'Positions de service — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/positions/positions-page').then((m) => m.PositionsPage),
+          },
+          {
+            path: 'fiche-de-crise',
+            title: 'Fiche de crise — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/formulaire/formulaire-config-page').then((m) => m.FormulaireConfigPage),
+          },
+          {
+            path: 'parametres',
+            title: 'Paramètres — Administration RNI',
+            canDeactivate: [unsavedChangesGuard],
+            loadComponent: () => import('./features/admin/parametres/parametres-page').then((m) => m.ParametresPage),
           },
           {
             path: 'perimetres',

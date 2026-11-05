@@ -22,7 +22,7 @@ describe('GestionStore', () => {
         provideHttpClient(withInterceptors([httpErrorInterceptor])),
         provideHttpClientTesting(),
         { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap(query) } } },
-        { provide: AuthService, useValue: { isGign: () => true } },
+        { provide: AuthService, useValue: { gestionNationale: () => true } },
       ],
     });
     store = TestBed.inject(GestionStore);

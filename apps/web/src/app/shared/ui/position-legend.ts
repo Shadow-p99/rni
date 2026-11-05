@@ -1,5 +1,4 @@
 import { Component, inject, input } from '@angular/core';
-import { NO_PLANNING_COLOR } from '@rni/shared';
 import { ReferentielService } from '../../core/referentiel/referentiel.service';
 
 /** Légende des positions de service (couleurs `ref_pos_service.color`). */
@@ -11,14 +10,14 @@ import { ReferentielService } from '../../core/referentiel/referentiel.service';
       <span class="flex items-center gap-2"><span class="inline-block size-3 rounded-full" [style.background]="p.color"></span>{{ p.libelle }}</span>
     }
     @if (withNone()) {
-      <span class="flex items-center gap-2"><span class="inline-block size-3 rounded-full" [style.background]="noneColor"></span>Sans planning</span>
+      <span class="flex items-center gap-2"><span class="inline-block size-3 rounded-full" [style.background]="noneColor()"></span>Sans planning</span>
     }
     <ng-content />
   `,
 })
 export class PositionLegend {
   protected readonly ref = inject(ReferentielService);
-  protected readonly noneColor = NO_PLANNING_COLOR;
+  protected readonly noneColor = this.ref.noPlanningColor;
   readonly vertical = input(false);
   readonly withNone = input(true);
 }

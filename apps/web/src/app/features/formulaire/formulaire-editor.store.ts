@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { FormulaireDto, GeocodeCandidate } from '@rni/shared';
 import { FormulaireApi } from '../../core/api/formulaire.api';
 import { AuthService } from '../../core/auth/auth.service';
+import { FormulaireConfigService } from '../../core/formulaire/formulaire-config.service';
 import { AppError } from '../../core/errors/app-error';
 import { ToastService } from '../../core/notifications/toast.service';
 import { ActionState, AsyncState } from '../../core/state/async-state';
@@ -18,7 +19,10 @@ export class FormulaireEditorStore {
 
   readonly fiche = new AsyncState<FormulaireDto | null>(null);
   readonly action = new ActionState();
-  readonly form = buildFormulaireForm();
+  /** Structure paramétrée (chargée par le résolveur de la route). */
+  readonly structure = inject(FormulaireConfigService);
+  private readonly champs = this.structure.champs();
+  readonly form = buildFormulaireForm(this.champs);
   readonly submitted = signal(false);
   /** Adresse terrain : texte saisi et candidat retenu (obligatoire). */
   readonly addressText = signal('');
@@ -29,6 +33,10 @@ export class FormulaireEditorStore {
   readonly isNew = computed(() => !this.current());
   readonly closed = computed(() => !!this.current()?.is_closed);
   readonly isAuthor = computed(() => !this.current() || this.current()!.id_user === this.auth.user()?.id_user);
+  /** Actions permises par les droits du profil (calculées par l'API pour chaque fiche). */
+  readonly canEdit = computed(() => (this.current() ? this.current()!.can_modifier : this.auth.canCreerFormulaire()));
+  readonly canClose = computed(() => !!this.current()?.can_cloturer);
+  readonly canDelete = computed(() => !!this.current()?.can_supprimer);
   /** Texte saisi ne correspondant à aucun candidat du géocodeur. */
   readonly addressInvalid = computed(() => !!this.addressText() && !this.address());
   readonly addressMissing = computed(() => this.submitted() && !this.address());
@@ -40,12 +48,12 @@ export class FormulaireEditorStore {
 
   private apply(f: FormulaireDto): void {
     this.fiche.set(f);
-    this.form.reset(toFormValue(f));
+    this.form.reset(toFormValue(f, this.champs));
     const a = addressOf(f);
     this.address.set(a);
     this.addressText.set(a?.address ?? (f['terrain_adresse'] as string | null) ?? '');
     this.addressDirty.set(false);
-    if (f.is_closed) this.form.disable();
+    if (f.is_closed || !f.can_modifier) this.form.disable();
     else this.form.enable();
   }
 
@@ -60,7 +68,7 @@ export class FormulaireEditorStore {
   }
 
   hasUnsavedChanges(): boolean {
-    return !this.closed() && (this.form.dirty || this.addressDirty());
+    return !this.closed() && this.canEdit() && (this.form.dirty || this.addressDirty());
   }
 
   /** Enregistre (création ou mise à jour). Renvoie la fiche, ou `null` si invalide / en échec. */
@@ -71,7 +79,7 @@ export class FormulaireEditorStore {
       this.toasts.warning('Fiche incomplète', 'Tous les champs sont obligatoires : renseignez au moins le nom ou le prénom et une adresse proposée.');
       return null;
     }
-    const body = toPayload(this.form.getRawValue(), this.address());
+    const body = toPayload(this.form.getRawValue(), this.address(), this.champs);
     const f = this.current();
     const r = await this.action.run(() => (f ? this.api.update(f.id_formulaire, body, { silent: true }) : this.api.create(body, { silent: true })));
     if (!r.ok) return null;
@@ -81,7 +89,7 @@ export class FormulaireEditorStore {
     return r.value;
   }
 
-  /** BR-FOR-5 / BR-FOR-6 : clôture par l'auteur, après enregistrement. */
+  /** BR-FOR-5 / BR-FOR-6 : clôture (droit `formulaire.cloturer`), après enregistrement. */
   async close(): Promise<boolean> {
     const f = this.current();
     if (!f) return false;

@@ -4,6 +4,7 @@ import type * as Leaflet from 'leaflet';
 import { L } from '../../../core/map/leaflet';
 import { tileUrl } from '../../../core/map/tiles';
 import type { Crise, MapView as View, PersonPoint } from '../carte.store';
+import { ReferentielService } from '../../../core/referentiel/referentiel.service';
 import { clusterColor, clusterIcon, criseIcon, personIcon } from '../map-icons';
 
 type Marker = Leaflet.Marker & { rni?: PersonnelPointProperties };
@@ -23,6 +24,7 @@ const TILE_FAILURE_THRESHOLD = 12;
 export class MapViewComponent {
   private readonly mapEl = viewChild.required<ElementRef<HTMLDivElement>>('map');
   private readonly destroyRef = inject(DestroyRef);
+  private readonly ref = inject(ReferentielService);
 
   readonly view = input.required<View>();
   readonly baseLayers = input.required<BaseLayerDto[]>();
@@ -70,7 +72,7 @@ export class MapViewComponent {
       spiderfyOnMaxZoom: false,
       iconCreateFunction: (c) => {
         const children = c.getAllChildMarkers().map((m) => (m as Marker).rni!).filter(Boolean);
-        return clusterIcon(c.getChildCount(), clusterColor(children));
+        return clusterIcon(c.getChildCount(), clusterColor(children, this.ref.clusterPriority(), this.ref.noPlanningColor()));
       },
     });
     // Clic sur un cluster : zoom si < 10, sinon fiche avec navigation entre les personnes

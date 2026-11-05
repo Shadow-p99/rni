@@ -1,5 +1,5 @@
 import { Component, inject, output, signal } from '@angular/core';
-import { PROFIL_LIBELLES, Profil, RPSI_SEARCH_MIN_CHARS, RpsiPersonnelDto, UserDto } from '@rni/shared';
+import { Profil, RPSI_SEARCH_MIN_CHARS, RpsiPersonnelDto, UserDto } from '@rni/shared';
 import { UsersApi } from '../../../core/api/users.api';
 import { ToastService } from '../../../core/notifications/toast.service';
 import { ActionState } from '../../../core/state/async-state';
@@ -8,6 +8,8 @@ import { ErrorPanel } from '../../../shared/ui/error-panel';
 import { Modal } from '../../../shared/ui/modal';
 import { Typeahead, TypeaheadBadge } from '../../../shared/ui/typeahead';
 import { ProfilPicker } from './profil-picker';
+import { AuthService } from '../../../core/auth/auth.service';
+import { ReferentielService } from '../../../core/referentiel/referentiel.service';
 
 /** BR-GPU-2 : inscription d'un personnel à partir du RPSI (ou réactivation d'un compte inactif). */
 @Component({
@@ -57,13 +59,16 @@ import { ProfilPicker } from './profil-picker';
 })
 export class UserAddDialog {
   private readonly api = inject(UsersApi);
+  protected readonly ref = inject(ReferentielService);
+  private readonly auth = inject(AuthService);
   private readonly toasts = inject(ToastService);
   readonly closed = output<void>();
   readonly saved = output<UserDto>();
 
   protected readonly action = new ActionState();
   protected readonly selected = signal<RpsiPersonnelDto | null>(null);
-  protected readonly profil = signal<number | null>(Profil.NEGOCIATEUR);
+  /** Profil proposé : négociateur s'il est géré, sinon le premier profil géré. */
+  protected readonly profil = signal<number | null>(this.defaultProfil());
   protected readonly minChars = RPSI_SEARCH_MIN_CHARS;
 
   protected readonly search = (q: string) => this.api.rpsi(q);
@@ -83,7 +88,12 @@ export class UserAddDialog {
     if (!p || profil == null) return;
     const r = await this.action.run(() => this.api.create({ nigend: p.nigend, id_profil: profil }, { silent: true }));
     if (!r.ok) return;
-    this.toasts.success(p.id_user ? 'Compte réactivé' : 'Compte créé', `${p.prenom} ${p.nom} — ${PROFIL_LIBELLES[profil as Profil]}`);
+    this.toasts.success(p.id_user ? 'Compte réactivé' : 'Compte créé', `${p.prenom} ${p.nom} — ${this.ref.profilLibelle(profil)}`);
     this.saved.emit(r.value);
+  }
+
+  private defaultProfil(): number | null {
+    const gerables = this.ref.sortProfils(this.auth.profilsGerables());
+    return gerables.includes(Profil.NEGOCIATEUR) ? Profil.NEGOCIATEUR : (gerables[0] ?? null);
   }
 }

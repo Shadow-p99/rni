@@ -28,9 +28,9 @@ describe('PlanningSlotDialog : clic sur une demi-journée d’une plage', () => 
         provideHttpClientTesting(),
         {
           provide: AuthService,
-          useValue: { profil: signal(3), user: signal({ id_user: 1, nigend: '200073', prenom: 'C', nom: 'F' }), canWritePlanning: () => true },
+          useValue: { profil: signal(3), user: signal({ id_user: 1, nigend: '200073', prenom: 'C', nom: 'F' }), canWritePlanning: () => true, planningSoiSeul: () => false, canRestrictedPositions: () => true },
         },
-        { provide: ReferentielService, useValue: { activePositions: () => positions, libelle: (id: number) => positions.find((p) => p.id_pos_service === id)?.libelle ?? '' } },
+        { provide: ReferentielService, useValue: { activePositions: () => positions, positions: () => positions, restrictedPositions: () => [4, 5], libelle: (id: number) => positions.find((p) => p.id_pos_service === id)?.libelle ?? '' } },
       ],
     });
     TestBed.inject(ConfigService).params.set(params);

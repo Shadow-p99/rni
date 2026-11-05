@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
-/** Administration (super administrateur) : onglets tableau de bord, journal, périmètres. */
+/** Administration (droit `admin.acces`) : supervision et paramétrage de l'application. */
 @Component({
   selector: 'rni-admin-layout',
   imports: [RouterLink, RouterLinkActive, RouterOutlet],
@@ -29,6 +29,11 @@ export class AdminLayout {
     { path: 'tableau-de-bord', label: 'Tableau de bord' },
     { path: 'journal', label: 'Journal' },
     { path: 'journalisation', label: 'Réglages des journaux' },
+    { path: 'droits', label: 'Droits' },
+    { path: 'profils', label: 'Profils' },
     { path: 'perimetres', label: 'Périmètres' },
+    { path: 'positions', label: 'Positions' },
+    { path: 'fiche-de-crise', label: 'Fiche de crise' },
+    { path: 'parametres', label: 'Paramètres' },
   ];
 }

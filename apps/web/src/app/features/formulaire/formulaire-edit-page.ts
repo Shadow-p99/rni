@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { SECTIONS, SectionId } from '@rni/shared';
+import { SectionId } from '@rni/shared';
 import { ExportService } from '../../core/export/export.service';
 import { HasUnsavedChanges } from '../../core/platform/unsaved-changes.guard';
 import { AsyncView } from '../../shared/ui/async-view';
@@ -31,14 +31,14 @@ import { exportFormulairePdf } from './formulaire-pdf';
           <div class="ml-auto flex flex-wrap gap-2">
             @if (f) {
               <button type="button" class="btn-secondary" (click)="pdfDialog.set(true)">⤓ PDF</button>
-              @if (store.isAuthor() && !store.closed()) {
-                <button type="button" class="btn-secondary text-amber-700" (click)="close()" [disabled]="store.action.busy()">Clôturer</button>
+              @if (store.canClose()) {
+                <button type="button" class="btn-secondary text-amber-700" (click)="close()" [disabled]="store.action.busy()" title="Rend la fiche définitivement non modifiable">🔒 Clôturer la fiche</button>
               }
-              @if (store.isAuthor()) {
+              @if (store.canDelete()) {
                 <button type="button" class="btn-ghost text-red-700" (click)="remove()" [disabled]="store.action.busy()">Supprimer</button>
               }
             }
-            @if (!store.closed()) {
+            @if (!store.closed() && store.canEdit()) {
               <button type="button" class="btn-primary" (click)="store.save()" [disabled]="store.action.busy() || store.fiche.loading()">
                 {{ store.action.busy() ? 'Enregistrement…' : 'Enregistrer' }}
               </button>
@@ -46,6 +46,15 @@ import { exportFormulairePdf } from './formulaire-pdf';
           </div>
         }
       </div>
+
+      @if (f && !f.is_closed && !f.can_cloturer) {
+        <p class="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">La clôture de cette fiche est réservée {{ store.isAuthor() ? 'à d’autres profils' : 'à son auteur' }} (droit « Clôturer une fiche de crise »).</p>
+      }
+      @if (f?.is_closed) {
+        <p class="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700" role="status">🔒 Fiche clôturée : elle n’est plus modifiable.</p>
+      } @else if (f && !f.can_modifier) {
+        <p class="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600" role="status">Consultation seule : votre profil ne modifie que ses propres fiches.</p>
+      }
 
       @if (store.fatal(); as e) {
         <div class="card p-6 text-center">
@@ -82,7 +91,7 @@ export class FormulaireEditPage implements HasUnsavedChanges {
 
   /** Paramètre de route `:id` (`new` pour une création). */
   readonly id = input<string>('new');
-  protected readonly sections = SECTIONS;
+  protected readonly sections = this.store.structure.sections();
   protected readonly pdfDialog = signal(false);
   protected isNewRoute = () => this.id() === 'new';
 
@@ -112,6 +121,6 @@ export class FormulaireEditPage implements HasUnsavedChanges {
   async exportPdf(sections: SectionId[]): Promise<void> {
     const f = this.store.current();
     if (!f) return;
-    if (await this.exporter.run(() => exportFormulairePdf(f, sections), 'Le PDF de la fiche n’a pas pu être généré.')) this.pdfDialog.set(false);
+    if (await this.exporter.run(() => exportFormulairePdf(f, sections, this.store.structure.config()), 'Le PDF de la fiche n’a pas pu être généré.')) this.pdfDialog.set(false);
   }
 }

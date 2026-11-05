@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import type { FormulaireDto, FormulaireFilter } from '@rni/shared';
+import type { FormulaireConfigDto, FormulaireDto, FormulaireFilter } from '@rni/shared';
 import { API, RequestOptions, ctx, toParams } from './api.config';
 
 @Injectable({ providedIn: 'root' })
@@ -9,6 +9,10 @@ export class FormulaireApi {
 
   list(filter: FormulaireFilter, opts?: RequestOptions) {
     return this.http.get<FormulaireDto[]>(`${API}/formulaire`, { params: toParams(filter), ...ctx(opts) });
+  }
+  /** Structure paramétrée de la fiche (types de crise, libellés, champs obligatoires). */
+  config(opts?: RequestOptions) {
+    return this.http.get<FormulaireConfigDto>(`${API}/formulaire/config`, ctx(opts));
   }
   get(id: number, opts?: RequestOptions) {
     return this.http.get<FormulaireDto>(`${API}/formulaire/${id}`, ctx(opts));

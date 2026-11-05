@@ -1,5 +1,7 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, RedirectCommand, ResolveFn, Router } from '@angular/router';
+import type { DroitCode } from '@rni/shared';
+import { FormulaireConfigService } from '../formulaire/formulaire-config.service';
 import { ReferentielService } from '../referentiel/referentiel.service';
 import { AuthService } from './auth.service';
 
@@ -13,14 +15,17 @@ export const isUserGuard: CanActivateFn = async (_route, state) => {
   return router.parseUrl('/unauthorized');
 };
 
-/** BR-AUTH-5 : page /gestion réservée aux profils 1, 3, 7. */
-export const isAdminGuard: CanActivateFn = () => (inject(AuthService).isAdmin() ? true : inject(Router).parseUrl('/unauthorized'));
+/** Page réservée à un droit du profil (Administration › Droits), sinon /unauthorized. */
+export const droitGuard =
+  (code: DroitCode): CanActivateFn =>
+  () =>
+    inject(AuthService).can(code) ? true : inject(Router).parseUrl('/unauthorized');
 
-/** Administration des périmètres : super administrateur uniquement. */
-export const superAdminGuard: CanActivateFn = () => (inject(AuthService).isSuperAdmin() ? true : inject(Router).parseUrl('/unauthorized'));
-
-/** BR-FOR-1 : profils 2, 5, 6 renvoyés vers /unauthorized. */
-export const formulaireGuard: CanActivateFn = () => (inject(AuthService).canFormulaire() ? true : inject(Router).parseUrl('/unauthorized'));
+/** Racine : première page accessible au profil. */
+export const homeRedirectGuard: CanActivateFn = () => {
+  const auth = inject(AuthService);
+  return inject(Router).parseUrl(auth.homePath() ?? '/unauthorized');
+};
 
 /** Référentiels indispensables (positions, couleurs, régions) chargés avant l'affichage des écrans. */
 export const referentielResolver: ResolveFn<boolean> = async (_route, state) => {
@@ -29,5 +34,11 @@ export const referentielResolver: ResolveFn<boolean> = async (_route, state) => 
     const router = inject(Router);
     return new RedirectCommand(router.parseUrl(`/indisponible?retour=${encodeURIComponent(state.url)}`)) as unknown as boolean;
   }
+  return true;
+};
+
+/** Structure paramétrée de la fiche de crise, relue à chaque entrée (repli : structure livrée). */
+export const formulaireConfigResolver: ResolveFn<boolean> = async () => {
+  await inject(FormulaireConfigService).load();
   return true;
 };

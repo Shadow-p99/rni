@@ -1,10 +1,11 @@
-import { FORMULAIRE_FIELDS, FormulaireDto, SECTIONS, SectionId } from '@rni/shared';
+import { FormulaireConfigDto, FormulaireDto, SectionId } from '@rni/shared';
+import { DEFAULT_FORMULAIRE_CONFIG } from '../../core/formulaire/formulaire-config.service';
 
 /**
  * BR-FOR-8 : export PDF A4 portrait ; le bloc Profil est systématique, les autres sections
  * sont choisies par l'utilisateur.
  */
-export async function exportFormulairePdf(f: FormulaireDto, sections: SectionId[]): Promise<void> {
+export async function exportFormulairePdf(f: FormulaireDto, sections: SectionId[], structure: FormulaireConfigDto = DEFAULT_FORMULAIRE_CONFIG): Promise<void> {
   const { jsPDF } = await import('jspdf');
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = pdf.internal.pageSize.getWidth();
@@ -36,7 +37,7 @@ export async function exportFormulairePdf(f: FormulaireDto, sections: SectionId[
   y = 30;
 
   const wanted: SectionId[] = ['profil', ...sections.filter((s) => s !== 'profil')];
-  for (const s of SECTIONS.filter((x) => wanted.includes(x.id))) {
+  for (const s of [...structure.sections].sort((a, b) => a.ordre - b.ordre).filter((x) => wanted.includes(x.id))) {
     ensure(14);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(12);
@@ -46,7 +47,7 @@ export async function exportFormulairePdf(f: FormulaireDto, sections: SectionId[
     pdf.line(M, y + 1.5, W - M, y + 1.5);
     pdf.setTextColor(0, 0, 0);
     y += 7;
-    for (const def of FORMULAIRE_FIELDS.filter((d) => d.section === s.id)) {
+    for (const def of structure.champs.filter((d) => d.section === s.id).sort((a, b) => a.ordre - b.ordre)) {
       const raw = f[def.key];
       const value = raw == null || raw === '' ? '—' : String(raw);
       const lines = pdf.splitTextToSize(value, W - M * 2 - 48) as string[];

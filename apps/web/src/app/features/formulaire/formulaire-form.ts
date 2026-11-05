@@ -1,13 +1,16 @@
 import { FormControl, FormGroup, Validators } from '@angular/forms';
-import { FORMULAIRE_FIELDS, FieldDef, FormulaireDto, GeocodeCandidate, NOTE_MAX, NOTE_MIN, SectionId } from '@rni/shared';
+import { CRISE_PAR_DEFAUT, FormulaireChampDto, FormulaireDto, GeocodeCandidate, NOTE_MAX, NOTE_MIN, SectionId } from '@rni/shared';
+import { DEFAULT_FORMULAIRE_CONFIG } from '../../core/formulaire/formulaire-config.service';
 import { nameValidator, phoneValidator } from '../../shared/forms/validators';
 
 export type FormulaireGroup = FormGroup<Record<string, FormControl>>;
 
-/** Construit le formulaire réactif à partir du catalogue partagé (§6.2). */
-export function buildFormulaireForm(): FormulaireGroup {
+const DEFAULT_CHAMPS = DEFAULT_FORMULAIRE_CONFIG.champs;
+
+/** Construit le formulaire réactif à partir de la structure paramétrée en base (§6.2). */
+export function buildFormulaireForm(champs: readonly FormulaireChampDto[] = DEFAULT_CHAMPS): FormulaireGroup {
   const group: FormulaireGroup = new FormGroup<Record<string, FormControl>>({}, { validators: nameValidator });
-  for (const def of FORMULAIRE_FIELDS) {
+  for (const def of champs) {
     const validators = [];
     if (def.required && def.kind !== 'address') validators.push(Validators.required);
     if (def.kind === 'phone') validators.push(phoneValidator);
@@ -17,24 +20,24 @@ export function buildFormulaireForm(): FormulaireGroup {
   return group;
 }
 
-export function defaultValue(def: FieldDef): string | number {
-  return def.kind === 'note' ? 0 : def.kind === 'select' ? 'Aucun' : '';
+export function defaultValue(def: Pick<FormulaireChampDto, 'kind'>): string | number {
+  return def.kind === 'note' ? 0 : def.kind === 'select' ? CRISE_PAR_DEFAUT : '';
 }
 
-export function fieldsOf(section: SectionId): FieldDef[] {
-  return FORMULAIRE_FIELDS.filter((f) => f.section === section);
+export function fieldsOf(section: SectionId, champs: readonly FormulaireChampDto[] = DEFAULT_CHAMPS): FormulaireChampDto[] {
+  return champs.filter((f) => f.section === section).sort((a, b) => a.ordre - b.ordre);
 }
 
 /** Valeurs à injecter dans le formulaire depuis une fiche. */
-export function toFormValue(f: FormulaireDto): Record<string, unknown> {
-  return Object.fromEntries(FORMULAIRE_FIELDS.map((d) => [d.key, f[d.key] ?? defaultValue(d)]));
+export function toFormValue(f: FormulaireDto, champs: readonly FormulaireChampDto[] = DEFAULT_CHAMPS): Record<string, unknown> {
+  return Object.fromEntries(champs.map((d) => [d.key, f[d.key] ?? defaultValue(d)]));
 }
 
 /** Corps envoyé à l'API (notes numériques, adresse et coordonnées issues du géocodeur). */
-export function toPayload(value: Record<string, unknown>, address: GeocodeCandidate | null): Record<string, unknown> {
+export function toPayload(value: Record<string, unknown>, address: GeocodeCandidate | null, champs: readonly FormulaireChampDto[] = DEFAULT_CHAMPS): Record<string, unknown> {
   return {
     ...value,
-    ...Object.fromEntries(FORMULAIRE_FIELDS.filter((d) => d.kind === 'note').map((d) => [d.key, Number(value[d.key] || 0)])),
+    ...Object.fromEntries(champs.filter((d) => d.kind === 'note').map((d) => [d.key, Number(value[d.key] || 0)])),
     terrain_adresse: address?.address ?? null,
     terrain_x: address?.x ?? null,
     terrain_y: address?.y ?? null,
