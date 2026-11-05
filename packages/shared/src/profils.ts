@@ -49,6 +49,22 @@ export const PLANNING_PROFILS: readonly Profil[] = [
   Profil.REFERENT_ADJOINT,
 ];
 
+/**
+ * BR-PLA-7 : profils autorisés à écrire dans le planning — les administrateurs nationaux partout,
+ * les référents dans leur région, le négociateur pour lui-même (contrôle fin côté API).
+ */
+export const PLANNING_WRITE_PROFILS: readonly Profil[] = [
+  Profil.GIGN,
+  Profil.SUPER_ADMIN,
+  Profil.REFERENT,
+  Profil.REFERENT_ADJOINT,
+  Profil.NEGOCIATEUR,
+];
+
+export function canWritePlanning(id: number | null | undefined): boolean {
+  return id != null && PLANNING_WRITE_PROFILS.includes(id);
+}
+
 /** BR-FOR-1 : profils exclus du module fiche de crise. */
 export const FORMULAIRE_EXCLUDED_PROFILS: readonly Profil[] = [
   Profil.LECTURE_SEULE,

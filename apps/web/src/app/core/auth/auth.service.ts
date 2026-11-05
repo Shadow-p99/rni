@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { CurrentUserDto, Profil, canAccessFormulaire, isAdminProfil, isNationalAdmin } from '@rni/shared';
+import { CurrentUserDto, Profil, canAccessFormulaire, canWritePlanning, isAdminProfil, isNationalAdmin } from '@rni/shared';
 import { firstValueFrom } from 'rxjs';
 import { UsersApi } from '../api/users.api';
 import { AppError, toAppError } from '../errors/app-error';
@@ -28,11 +28,11 @@ export class AuthService {
   /** Administrateur national (GIGN ou super administrateur) : toutes les régions, tous les comptes. */
   readonly isGign = computed(() => isNationalAdmin(this.profil()));
   readonly isSuperAdmin = computed(() => this.profil() === Profil.SUPER_ADMIN);
-  /** `checkAuthorization` : droits étendus (1, 3, 7) — crise, plannings des autres. */
+  /** `checkAuthorization` : droits étendus (administrateurs) — crise, plannings des autres. */
   readonly hasExtendedRights = computed(() => isAdminProfil(this.profil()));
   readonly canFormulaire = computed(() => canAccessFormulaire(this.profil()));
-  /** Écritures planning : profils 1, 3, 4, 7. */
-  readonly canWritePlanning = computed(() => [1, 3, 4, 7, 8].includes(this.profil() ?? -1));
+  /** Écritures planning (BR-PLA-7) : PLANNING_WRITE_PROFILS de @rni/shared. */
+  readonly canWritePlanning = computed(() => canWritePlanning(this.profil()));
 
   load(force = false): Promise<AuthStatus> {
     const s = this.status();

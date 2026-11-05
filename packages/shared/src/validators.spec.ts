@@ -1,5 +1,5 @@
 import { dedupeNeo, geolocIndicatif, isValidPhone, hasNameOrFirstName } from './validators.js';
-import { assignableProfils, defaultPerimetre, Profil, listableProfils } from './profils.js';
+import { ADMIN_PROFILS, PLANNING_WRITE_PROFILS, assignableProfils, canWritePlanning, defaultPerimetre, Profil, listableProfils } from './profils.js';
 
 describe('validateurs', () => {
   it('téléphones FR et internationaux', () => {
@@ -21,6 +21,14 @@ describe('validateurs', () => {
 });
 
 describe('profils', () => {
+  it('écriture planning (BR-PLA-7) : GIGN, super administrateur, référents et négociateur', () => {
+    const allowed = Object.values(Profil).filter((v): v is Profil => typeof v === 'number' && canWritePlanning(v));
+    expect(allowed.sort()).toEqual([Profil.GIGN, Profil.REFERENT, Profil.NEGOCIATEUR, Profil.REFERENT_ADJOINT, Profil.SUPER_ADMIN].sort());
+    for (const p of [Profil.LECTURE_SEULE, Profil.FICHE_CRISE, Profil.OMS, null, undefined, 99]) expect(canWritePlanning(p)).toBe(false);
+    // Cohérent avec la règle d'écriture par défaut de l'API (administrateurs + négociateur)
+    for (const p of PLANNING_WRITE_PROFILS) expect([...ADMIN_PROFILS, Profil.NEGOCIATEUR]).toContain(p);
+  });
+
   it('profils attribuables (BR-GPU-3)', () => {
     expect(assignableProfils(Profil.GIGN)).toContain(Profil.OMS);
     expect(assignableProfils(Profil.REFERENT)).not.toContain(Profil.GIGN);
