@@ -111,14 +111,30 @@ export class AuthGuard implements CanActivate {
   }
 }
 
+/**
+ * Texte reçu en UTF-8 brut mais lu octet par octet (Node décode les en-têtes HTTP en Latin-1) :
+ * « HÃ©lÃ¨ne » → « Hélène ». Laissé tel quel s'il ne s'agit pas d'UTF-8 valide.
+ */
+export function fixUtf8(s: string): string {
+  if (!/[\u0080-\u00ff]/.test(s) || /[^\u0000-\u00ff]/.test(s)) return s;
+  const utf8 = Buffer.from(s, 'latin1').toString('utf8');
+  return utf8.includes('\uFFFD') ? s : utf8;
+}
+
+/**
+ * Valeur d'un en-tête SSO (nigend, cn, title…). Les accents peuvent arriver encodés en URL
+ * (`H%C3%A9l%C3%A8ne`) ou en UTF-8 brut (extensions de navigateur type ModHeader, certains proxys) :
+ * les deux formes sont décodées.
+ */
 export function headerValue(req: Request, name: string): string | undefined {
   const v = req.headers[name];
   const s = Array.isArray(v) ? v[0] : v;
   if (!s) return undefined;
-  // Les en-têtes SSO peuvent être encodés (accents) : décodage best-effort.
+  let text = fixUtf8(s);
   try {
-    return decodeURIComponent(s).trim() || undefined;
+    text = decodeURIComponent(text);
   } catch {
-    return s.trim() || undefined;
+    /* pas encodé en URL : valeur conservée */
   }
+  return text.trim() || undefined;
 }
