@@ -53,14 +53,15 @@ export interface RangeSelect {
             </tr>
           }
           <tr class="hover:bg-slate-50">
-            <th scope="row" class="sticky left-0 z-10 border-b border-slate-100 bg-white px-2 py-0.5 text-left font-normal whitespace-nowrap">
+            <th scope="row" class="sticky left-0 z-10 border-b border-slate-400 bg-white px-2 py-0.5 text-left font-normal whitespace-nowrap">
               <span class="font-medium">{{ row.user.abreviation_grade }} {{ row.user.nom }}</span> {{ row.user.prenom }}
               @if (row.user.id_profil !== 4) {
                 <span class="chip ml-1 bg-rni-100 px-1.5 text-[10px] text-rni-800">{{ row.user.libelle_profil }}</span>
               }
             </th>
             @for (c of row.cells; track c.date) {
-              <td class="h-7 border-b border-l border-slate-100 p-0" [class.bg-slate-50]="c.weekend" [class.!bg-amber-50]="c.today">
+              <!-- Bas de ligne foncé : distingue deux personnels de la séparation Jour / Nuit (blanche) -->
+              <td class="h-7 border-b border-l border-l-slate-100 border-b-slate-400 p-0" [class.bg-slate-50]="c.weekend" [class.!bg-amber-50]="c.today">
                 <!-- Toujours deux demi-cases séparées : Jour (haut) et Nuit (bas) -->
                 @for (h of [c.jour, c.nuit]; track h.slot) {
                   <button

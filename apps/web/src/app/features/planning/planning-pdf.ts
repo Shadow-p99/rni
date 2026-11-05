@@ -171,8 +171,11 @@ export async function buildPlanningPdf(input: PlanningPdfInput): Promise<import(
         fill(c.nuit.color ? hexToRgb(c.nuit.color) : EMPTY_NUIT);
         pdf.rect(x, y + rowH / 2 + 0.15, w, rowH / 2 - 0.3, 'F');
       });
-      pdf.setDrawColor(241, 245, 249);
+      // Séparation entre personnels plus foncée que la séparation Jour / Nuit (blanche)
+      pdf.setDrawColor(148, 163, 184);
+      pdf.setLineWidth(0.25);
       pdf.line(M, y + rowH, W - M, y + rowH);
+      pdf.setLineWidth(0.2);
       y += rowH;
     }
     y += 2;
